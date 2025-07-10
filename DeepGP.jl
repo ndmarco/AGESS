@@ -7,6 +7,13 @@ function gen_data(N::T, min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:In
     return X, Y_N
 end
 
+function gen_data_Higdon(N::T,min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:Integer}
+    X = collect(LinRange(min_eval, max_eval, N))
+    Y_N = sin.((π .* X) ./ 5) + 0.2 * cos.(((4 * π) .* X) ./ 5)
+    Y_N[X .> 10] .= (X[X .> 10.0]) ./ 10 .- 0.8
+    return X, Y_N
+end
+
 function construct_Kernel_Mat!(Σ::AbstractMatrix{Y}, X::AbstractVector{Y}, θ::Y) where {Y<:AbstractFloat}
     for j in 1:size(Σ)[1],k in 1:size(Σ)[2]
         Σ[j,k] = exp(-(((X[j] - X[k])^2) / θ))
