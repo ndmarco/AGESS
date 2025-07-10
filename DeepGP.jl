@@ -27,36 +27,23 @@ function likelihood_Y(W::AbstractVector{Y}, X::AbstractVector{Y}, Y_N::AbstractV
                       Σ::AbstractMatrix{Y}) where {Y<:AbstractFloat}
     construct_Kernel_Mat_y!(Σ, X, W, θ_y_x, θ_y_w)
     Σ[diagind(Σ)] .+=  g
-    lpdf = -Inf
-    try
-        cholesky!(Σ)
-        ph .= LowerTriangular(Σ) \ Y_N
-        lpdf =  -sum(log.(diag(Σ))) * -0.5 * dot(ph, ph)
-    catch e
-        lpdf = -Inf
-    end
-    
+    cholesky!(Σ)
+    ph .= LowerTriangular(Σ) \ Y_N
+    lpdf =  -sum(log.(diag(Σ)))  - (0.5 * (1 +length(ph)) * log1p(dot(ph, ph)))
 
     return lpdf
 end
 
 function likelihood_W(W::AbstractVector{Y}, X_N::AbstractVector{Y}, θ_w::Y, g::Y, ph::AbstractVector{Y}, Σ::AbstractMatrix{Y}) where {Y<:AbstractFloat}
     construct_Kernel_Mat!(Σ, X_N, θ_w)
-    Σ[diagind(Σ)] .+=  g
-    lpdf = -Inf
-    try
-        cholesky!(Σ)
+    Σ[diagind(Σ)] .+= g
+    cholesky!(Σ)
 
-        ph .= LowerTriangular(Σ) \ W
-        lpdf = -sum(log.(diag(Σ))) * -0.5 * dot(ph, ph)
-    catch e
-        lpdf = -Inf
-    end
-    
+    ph .= LowerTriangular(Σ) \ W
+    lpdf = -sum(log.(diag(Σ)))  - 0.5 * dot(ph, ph)
 
     return lpdf
 end
-
 
 
 function sample_aux_parameters(θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector{Y},
@@ -94,7 +81,7 @@ function sample_aux_parameters(θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector
 
     θ_w_prop = rand(LogNormal(log(θ_w[i]), σ_θ_w))
     accept_prob = likelihood_W(W, X_N, θ_w_prop, g, ph1, Σ1) + prior_θ(θ_w_prop) - (likelihood_W(W, X_N, θ_w[i], g, ph2, Σ2) + prior_θ(θ_w[i]))
-    accept_prob += (logpdf(LogNormal(log(θ_w_prop), σ_θ_w), θ_w[i]) -logpdf(LogNormal(log(θ_w[i]), σ_θ_w), θ_w_prop))
+    accept_prob += (logpdf(LogNormal(log(θ_w_prop), σ_θ_w), θ_w[i]) - logpdf(LogNormal(log(θ_w[i]), σ_θ_w), θ_w_prop))
     if !isnan(accept_prob)
         if isfinite(accept_prob)
             if log(rand()) < accept_prob
@@ -168,8 +155,11 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
         Σ_out[diagind(Σ_out)] .+= g
         Σ_out .-= ph * k_out_Y'
         Σ_out .= Hermitian(Σ_out)
+        Σ_out .*= ((1 + dot(ph1, ph1)) / (1 + P))
+        Σ_out .*= rand(Gamma((P + 1) * 0.5, 2 / (P+1)))
         cholesky!(Σ_out)
 
+        
         Y_out[i - burnin_num,:] .= LowerTriangular(Σ_out) * randn(P_out) 
         Y_out[i - burnin_num,:] .+= μ_out
     end
@@ -177,37 +167,50 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
     return Y_out
 end
 
+function plot_CI(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, Y_out::AbstractMatrix{Y},
+                 time_points::AbstractVector{Y}) where {Y<:AbstractFloat}
+    p = plot(X_N, Y_N, seriestype=:scatter, color = "red")
+    P_out = length(time_points)
+    Upper_CI = zeros(P_out)
+    Lower_CI = zeros(P_out)
+    median_est = zeros(P_out)
+    for i in 1:P_out
+        median_est[i] = median(Y_out[:,i])
+        Lower_CI[i] = quantile(Y_out[:,i], 0.025)
+        Upper_CI[i] = quantile(Y_out[:,i], 0.975)
+    end
+    p = plot!(p, time_points, median_est)
+    p = plot!(p, time_points, Lower_CI, fillrange = Upper_CI, fillalpha = 0.3, alpha = 0.3)
+
+    return p
+end
+
 function sampler_ESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::AbstractMatrix{Y}, θ_w::AbstractVector{Y}, 
                      θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector{Y}, g::Y, prior_θ::Function,
-                     σ_θ_y_x::Y = 0.1, σ_θ_y_w::Y = 0.1, σ_θ_w::Y = 0.1, ν::Y = -1.0, tuning_step::T = 25) where {Y<:AbstractFloat, T<:Integer}
+                     σ_θ_y_x::Y = 0.1, σ_θ_y_w::Y = 0.1, σ_θ_w::Y = 0.1, tuning_step::T = 25) where {Y<:AbstractFloat, T<:Integer}
     accept_vec = zeros(3)
     n_MCMC = size(W)[1]
     P = length(Y_N)
 
-    Σ2 = diagm(ones(P))
     Σ1 = diagm(ones(P))
+    Σ2 = diagm(ones(P))
+
     ph = ones(P)
     ph1 = ones(P)
     ph2 = ones(P)
-    if ν <= 0.0
-        ν = float(P)
-    end
-
-    ph = zeros(P)
-
 
     for i in 2:n_MCMC
         ## Sample auxillary parameters
         @views sample_aux_parameters(θ_y_x, θ_y_w, θ_w, ph1, ph2, Σ1, Σ2, X_N, W[i,:], Y_N,
-                              σ_θ_w, σ_θ_y_x, σ_θ_y_w, prior_θ, g, i, accept_vec)
+                                     σ_θ_w, σ_θ_y_x, σ_θ_y_w, prior_θ, g, i, accept_vec)
 
         
         ## Sample W
         construct_Kernel_Mat!(Σ2, X_N, θ_w[i])
-        cholesky!(Σ2) 
         Σ2[diagind(Σ2)] .+= g
+        cholesky!(Σ2) 
         ESS_SingleStep(W, ph, b -> likelihood_Y(b, X_N, Y_N, g, θ_y_x[i], θ_y_w[i], ph1, Σ1), LowerTriangular(Σ2), i)
-        
+
         if (i % tuning_step) == 0
             println("MCMC iter: ", i)
             println("Acceptance θ_y_x: ", round(accept_vec[1] / tuning_step, digits=3))
@@ -218,7 +221,6 @@ function sampler_ESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstract
             σ_θ_w = exp(log(σ_θ_w) + ((accept_vec[3] / tuning_step) - 0.44) / i)
             σ_θ_y_x = exp(log(σ_θ_y_x) + ((accept_vec[1] / tuning_step) - 0.44) / i)
             σ_θ_y_w = exp(log(σ_θ_y_w) + ((accept_vec[2] / tuning_step) - 0.44) / i)
-
             accept_vec .= 0
         end
 
@@ -311,19 +313,26 @@ W = ones(10000, N_obs)
 W[1,:] .= X_N
 W[2,:] .= X_N
 
-
 g = 10e-8
-θ_w = ones(10000) * 0.02
-θ_y_x = ones(10000) * 0.02
-θ_y_w = ones(10000) * 0.02
+θ_w = ones(10000) * 0.5
+θ_y_x = ones(10000) * 0.5
+θ_y_w = ones(10000) * 0.5
 
 
-sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(InverseGaussian(2,1), k))
+ph1 = zeros(50)
+Σ1 = diagm(ones(50))
+Σ2 = diagm(ones(50))
+
+sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(2,1), k))
 
 time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
+time_points = setdiff(time_points, X_N)
 
 Y_pred = predictive_draws(time_points, W, θ_w, θ_y_x, θ_y_w, g, Y_N, X_N)
-plot(Y_pred[:,1:50]')
+p = plot_CI(Y_N, X_N, Y_pred, time_points)
+p
+
+
 
 sampler_AGESS(Y_N, X_N, W, g, θ_w, θ_y, j -> logpdf(InverseGaussian(2,1), j),
               true)

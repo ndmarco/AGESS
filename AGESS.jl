@@ -121,7 +121,6 @@ end
 
 
 
-## Need to do based on conditional distribution??
 function dMvT(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, 
               ph::AbstractVector{Y}, ν::Y, P::T) where {Y<:AbstractFloat, T<:Integer}
     ph .= ((Σ_chol) \ (x .- μ))
@@ -238,7 +237,7 @@ function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Functi
         end
 
         ## Adapt mean and covariance
-        w_i = min(1.0/(10 * P), 1.0/i)
+        w_i = min(1.0/(10 * P), i^(-2/3))
         μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
         lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))
