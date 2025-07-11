@@ -147,6 +147,27 @@ function cond_rMvT!(z::AbstractVector{Y}, x::AbstractVector{Y}, μ::AbstractVect
 
     return nothing
 end
+
+function dMvT_1d(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
+    pdf = -(ν + 1) * 0.5 * log1p(((x - μ)^2 / (σ^2)) / ν)
+    return pdf
+end
+
+function dMvN_1d(x::Y, μ::Y, σ::Y) where {Y<:AbstractFloat} 
+    pdf =  - 0.5 * ((x - μ)^2 / (σ^2))
+    return pdf
+end
+
+function cond_rMvT_1d!(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
+    z = σ * randn() 
+    d = (x - μ)^2 / (σ^2)
+    ν̃ = ν + 1
+    z *= sqrt((ν + d) / ν̃)
+    z *= sqrt(rand(Gamma(ν̃/2, 2/ ν̃)))
+    z += μ
+
+    return z
+end
     
 
 
@@ -329,6 +350,75 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, log_likelihood::Function, log_pr
     return nothing
 end
 
+function AGESS_SingleStep_1d(x::AbstractVector{Y}, log_likelihood::Function, log_prior::Function, 
+                             t_dist::Bool, ν::Y, μ_adapt::Y, σ::Y, i::T) where {Y<:AbstractFloat, T<:Integer}
+
+    z = 0.0
+    ## Propose new z from N(0, Σ)
+    if t_dist == true
+        z = cond_rMvT_1d!(x[i], μ_adapt, σ, ν)
+    else
+        z = σ * randn() + μ_adapt
+    end
+
+    @views y = log_likelihood(x[i]) + log_prior(x[i]) + log(rand(1)[1])
+    if t_dist == true
+        @views y -= dMvT_1d(x[i], μ_adapt, σ, ν)
+    else
+        @views y -= dMvN_1d(x[i,:], μ_adapt, σ)
+    end
+
+    ## Propose Initial Angle
+    θ = rand(1)[1] * 2 * π
+    θ_min = θ - 2 * π
+    θ_max = θ
+
+    ## Propose initial first move
+    x[i] = x[i-1] * cos(θ) +  z * sin(θ)
+    @views L_star = log_likelihood(x[i]) + log_prior(x[i]) 
+    if t_dist == true
+        @views L_star -= dMvT_1d(x[i], μ_adapt, σ, ν)
+    else
+        @views L_star -= dMvN_1d(x[i], μ_adapt, σ)
+    end
+
+    ## Check to make sure that posterior pdfs are computable
+    if isnan(L_star)
+        L_star = y - 1.0
+    end
+    if !isfinite(L_star)
+        L_star = y - 1.0
+    end
+
+    while L_star <= y
+        if θ < 0
+            θ_min = θ
+        else
+            θ_max = θ
+        end
+
+        ## Propose new angle
+        θ = θ_min + rand(1)[1] * (θ_max - θ_min)
+        x[i] = x[i-1] * cos(θ) +  z * sin(θ)
+        @views L_star = log_likelihood(x[i]) + log_prior(x[i])
+        if t_dist == true
+            @views L_star -= dMvT_1d(x[i], μ_adapt, σ, ν)
+        else
+            @views L_star -= dMvN_1d(x[i], μ_adapt, σ)
+        end
+
+        ## Check to make sure that posterior pdfs are computable
+        if isnan(L_star)
+            L_star = y - 1.0
+        end
+        if !isfinite(L_star)
+            L_star = y - 1.0
+        end
+    end
+
+    return nothing
+end
+
 function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, block1::T,
              init_σ::Y, μ::AbstractVector{Y}, Σ::AbstractMatrix{Y}; tuning_step = 25, burnin::Y=0.5) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
@@ -423,7 +513,7 @@ end
 function ARW_SingleStep_1d(x::AbstractVector{Y}, log_likelihood::Function, log_prior::Function,
                            σ_rw::Y, i::T, acceptance::T) where {Y<:AbstractFloat, T<:Integer}
     z = x[i] + randn() * σ_rw
-    accept_prob = (log_likelihood(z) + log_prior(x)) - (log_likelihood(x[i]) + log_prior(x[i]))
+    accept_prob = (log_likelihood(z) + log_prior(z)) - (log_likelihood(x[i]) + log_prior(x[i]))
     if isfinite(accept_prob)
         if log(rand()) < accept_prob
             x[i] = z
