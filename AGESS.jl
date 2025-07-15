@@ -71,7 +71,7 @@ function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, Σ::AbstractMatrix{
 end
 
 function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likelihood::Function, 
-                        Σ_chol::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
+                        μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
 
     ## Propose new z from N(0, Σ)
@@ -84,7 +84,7 @@ function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likeliho
     θ_max = θ
 
     ## Propose initial first move
-    x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
+    x[i,:] .= ((x[i-1,:] - μ) .* cos(θ) .+  z .* sin(θ)) .+ μ
     @views log_lik_prop = log_likelihood(x[i,:])
 
     ## Check to make sure that posterior pdfs are computable
@@ -104,7 +104,7 @@ function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likeliho
 
         ## Propose new angle
         θ = θ_min + rand(1)[1] * (θ_max - θ_min)
-        x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
+        x[i,:] .= ((x[i-1,:] - μ) .* cos(θ) .+  z .* sin(θ)) .+ μ
         @views log_lik_prop = log_likelihood(x[i,:])
 
         ## Check to make sure that posterior pdfs are computable
@@ -142,7 +142,7 @@ function cond_rMvT!(z::AbstractVector{Y}, x::AbstractVector{Y}, μ::AbstractVect
     d = dot(ph, ph)
     ν̃ = ν + P
     z .*= sqrt((ν + d) / ν̃)
-    z .*= sqrt(rand(Gamma(ν̃/2, 2/ ν̃)))
+    z .*=  1 / sqrt(rand(Gamma(ν̃/2, 2/ ν̃)))
     z .+= μ
 
     return nothing
@@ -170,122 +170,13 @@ function cond_rMvT_1d!(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
 end
     
 
-
-function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
-               μ::AbstractVector{Y}, Σ::AbstractMatrix{Y}, t_dist::Bool, ν::Y = -1.0;
-               burnin::Y = 0.5) where {Y<:AbstractFloat}
-    P = size(x)[2]
-    n_MCMC = size(x)[1]
-    z = zeros(P)
-    burnin_num = floor(Int64, burnin * n_MCMC)
-    t1 = time()
-
-    if ν <= 0.0
-        ν = float(P)
-    end
-
-    μ_adapt = copy(μ)
-    ph = similar(μ_adapt)
-
-    Σ_chol = cholesky(Σ)
-    Σ_chol_adapt = deepcopy(Σ_chol)
-
-
-    for i in 2:n_MCMC
-        if i == burnin_num
-            t1 = time()
-        end
-        ## Propose new z from N(0, Σ)
-        if t_dist == true
-            cond_rMvT!(z, x[i,:], μ_adapt, Σ_chol_adapt.L, ν, ph, P)
-        else
-            z .= Σ_chol_adapt.L * randn(P) .+ μ_adapt
-        end
-        
-        @views y = log_likelihood(x[i,:]) + log_prior(x[i,:], μ, Σ_chol.L) + log(rand(1)[1])
-        if t_dist == true
-            @views y -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt.L, ph, ν, P)
-        else
-            @views y -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt.L, ph)
-        end
-
-        ## Propose Initial Angle
-        θ = rand(1)[1] * 2 * π
-        θ_min = θ - 2 * π
-        θ_max = θ
-
-        ## Propose initial first move
-        x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
-        @views L_star = log_likelihood(x[i,:]) + log_prior(x[i,:], μ, Σ_chol.L) 
-        if t_dist == true
-            @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt.L, ph, ν, P)
-        else
-            @views L_star -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt.L, ph)
-        end
-
-        ## Check to make sure that posterior pdfs are computable
-        if isnan(L_star)
-            L_star = y - 1.0
-        end
-        if !isfinite(L_star)
-            L_star = y - 1.0
-        end
-
-        while L_star <= y
-            if θ < 0
-                θ_min = θ
-            else
-                θ_max = θ
-            end
-
-            ## Propose new angle
-            θ = θ_min + rand(1)[1] * (θ_max - θ_min)
-            x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
-            @views L_star = log_likelihood(x[i,:]) + log_prior(x[i,:], μ, Σ_chol.L) 
-            if t_dist == true
-                @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt.L, ph, ν, P)
-            else
-                @views L_star -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt.L, ph)
-            end
-
-            ## Check to make sure that posterior pdfs are computable
-            if isnan(L_star)
-                L_star = y - 1.0
-            end
-            if !isfinite(L_star)
-                L_star = y - 1.0
-            end
-        end
-
-        ## Adapt mean and covariance
-        w_i = min(1.0/(10 * P), i^(-2/3))
-        μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
-        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))
-
-        ## Populate next value in Markov Chain
-        if i < n_MCMC
-            x[i+1,:] .= x[i,:]
-        end
-
-        ## Update User
-        if (i % 25) == 0
-            println("MCMC iter: ", i)
-            log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
-            println("Log Likelihood: ", log_lik)
-        end
-    end
-
-    return time() - t1
-end
-
 function AGESS_SingleStep(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
                           ph::AbstractVector{Y}, t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y},
                           Σ_chol_adapt::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
 
     z = zeros(P)
-    ## Propose new z from N(0, Σ)
+    ## Propose new z from N(μ, Σ)
     if t_dist == true
         cond_rMvT!(z, x[i,:], μ_adapt, Σ_chol_adapt, ν, ph, P)
     else
@@ -305,7 +196,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, log_likelihood::Function, log_pr
     θ_max = θ
 
     ## Propose initial first move
-    x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
+    x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
     @views L_star = log_likelihood(x[i,:]) + log_prior(x[i,:]) 
     if t_dist == true
         @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)
@@ -330,7 +221,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, log_likelihood::Function, log_pr
 
         ## Propose new angle
         θ = θ_min + rand(1)[1] * (θ_max - θ_min)
-        x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
+        x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
         @views L_star = log_likelihood(x[i,:]) + log_prior(x[i,:]) 
         if t_dist == true
             @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)
@@ -348,6 +239,60 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, log_likelihood::Function, log_pr
     end
 
     return nothing
+end
+
+function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
+               μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
+               t_dist::Bool, ν::Y = -1.0; burnin::Y = 0.5, ϵ::Y = 0.05) where {Y<:AbstractFloat, T<:Integer}
+    P = size(x)[2]
+    n_MCMC = size(x)[1]
+    z = zeros(P)
+    burnin_num = floor(Int64, burnin * n_MCMC)
+    t1 = time()
+
+    if ν <= 0.0
+        ν = float(P)
+    end
+
+    μ_adapt = copy(μ)
+    ph = similar(μ_adapt)
+
+    Σ_chol = cholesky(Σ)
+    Σ_chol_adapt = deepcopy(Σ_chol)
+
+    for i in 2:n_MCMC
+        if i == burnin_num
+            t1 = time()
+        end
+
+        if rand() > ϵ
+            AGESS_SingleStep(x, log_likelihood, log_prior, ph, t_dist, ν, μ_adapt,
+                             Σ_chol_adapt.L, i)
+        else
+            AGESS_SingleStep(x, log_likelihood, log_prior, ph, t_dist, ν, zeros(P),
+                             LowerTriangular(diagm(ones(P))), i)
+        end
+        
+        ## Adapt mean and covariance
+        w_i = min(1.0/(10 * P), i^(-2/3))
+        μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
+        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
+        lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))
+
+        ## Populate next value in Markov Chain
+        if i < n_MCMC
+            x[i+1,:] .= x[i,:]
+        end
+
+        ## Update User
+        if (i % 25) == 0
+            println("MCMC iter: ", i)
+            log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
+            println("Log Likelihood: ", log_lik)
+        end
+    end
+
+    return time() - t1
 end
 
 function AGESS_SingleStep_1d(x::AbstractVector{Y}, log_likelihood::Function, log_prior::Function, 

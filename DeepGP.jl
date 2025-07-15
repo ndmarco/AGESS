@@ -233,7 +233,7 @@ function sampler_ESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstract
         construct_Kernel_Mat!(Σ2, X_N, θ_w[i])
         Σ2[diagind(Σ2)] .+= g
         cholesky!(Σ2) 
-        ESS_SingleStep(W, ph, b -> likelihood_Y(b, X_N, Y_N, g, θ_y_x[i], θ_y_w[i], ph1, Σ1), LowerTriangular(Σ2), i)
+        ESS_SingleStep(W, ph, b -> likelihood_Y(b, X_N, Y_N, g, θ_y_x[i], θ_y_w[i], ph1, Σ1), zeros(P), LowerTriangular(Σ2), i)
 
         if (i % tuning_step) == 0
             println("MCMC iter: ", i)
@@ -259,9 +259,74 @@ function sampler_ESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstract
     end
 end
 
+function sampler_GESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::AbstractMatrix{Y}, θ_w::AbstractVector{Y}, 
+                      θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector{Y}, g::Y, prior_θ::Function,
+                      μ::AbstractVector{Y}, Σ::AbstractMatrix{Y}; ν::Y = 3.0) where {Y<:AbstractFloat}
+    n_MCMC = size(W)[1]
+    P = length(Y_N)
+
+    Σ1 = diagm(ones(P))
+    Σ2 = diagm(ones(P))
+
+    ph = ones(P+3)
+    ph1 = ones(P)
+    ph2 = ones(P)
+    ph3 = ones(P + 3)
+
+    W_θ = zeros(n_MCMC, P + 3)
+    W_θ[1, 1:P] .= W[1,:]
+    W_θ[1, P+1] = θ_y_x[1]
+    W_θ[1, P+2] = θ_y_w[1]
+    W_θ[1, P+3] = θ_w[1]
+    Σ_chol = cholesky(Σ)
+
+    for i in 2:n_MCMC
+        W_θ[i, 1:P] .= W[i,:]
+        W_θ[i, P+1] = θ_y_x[i]
+        W_θ[i, P+2] = θ_y_w[i]
+        W_θ[i, P+3] = θ_w[i]
+        α = 0.5 * (ν + P + 3)
+        ph .= Σ_chol.L \ (W_θ[i,:] - μ)
+        β = 0.5 * (ν + dot(ph,ph))
+        s = rand(InverseGamma(α, β))
+
+
+        ESS_SingleStep(W_θ, ph, b -> (likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) + 
+                        likelihood_W(b[1:P], X_N, exp(b[P+3]), g, ph2, Σ2) + prior_θ(exp(b[P+1])) + b[P+1] + 
+                        prior_θ(exp(b[P+2])) + b[P+2] + prior_θ(exp(b[P+3])) + b[P+3] - dMvT(b, μ, Σ_chol.L, 
+                        ph3, ν, P+3)), μ, sqrt(s) * Σ_chol.L, i)
+
+        W[i,:] .= W_θ[i, 1:P]
+        θ_y_x[i] = W_θ[i, P+1]
+        θ_y_w[i] = W_θ[i, P+2]
+        θ_w[i] = W_θ[i, P+3]
+        ## Update next state
+
+        if (i % 100) == 0
+            println("MCMC iter: ", i)
+            log_lik = @sprintf("%.2f", likelihood_Y(W[i,:], X_N, Y_N, g, exp(θ_y_x[i]), exp(θ_y_w[i]), ph1, Σ1))
+            println("Log Likelihood: ", log_lik)
+        end
+        
+        if i < n_MCMC
+            W[i+1,:] .= W[i,:]
+            θ_w[i+1] = θ_w[i]
+            θ_y_x[i+1] = θ_y_x[i]
+            θ_y_w[i+1] = θ_y_w[i]
+        end
+
+    end
+
+    θ_w .= exp.(θ_w)
+    θ_y_x .= exp.(θ_y_x)
+    θ_y_w .= exp.(θ_y_w)
+
+    return nothing
+end
+
 function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::AbstractMatrix{Y},
                        θ_w::AbstractVector{Y}, θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector{Y}, 
-                       g::Y, prior_θ::Function, t_dist::Bool, σ_θ_w::Y = 0.1, ν::Y = -1.0, ϵ::Y = 0.05) where {Y<:AbstractFloat}
+                       g::Y, prior_θ::Function, t_dist::Bool; ν::Y = 6.0, ϵ::Y = 0.00) where {Y<:AbstractFloat, T<:Integer}
 
     n_MCMC = size(W)[1]
     P = length(Y_N)
@@ -272,9 +337,7 @@ function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstra
     ph = ones(P + 3)
     ph1 = ones(P)
     ph2 = ones(P)
-    if ν <= 0.0
-        ν = float(P + 3)
-    end
+    println(ν)
 
     W_θ = zeros(n_MCMC, P + 3)
     W_θ[1, 1:P] .= W[1,:]
@@ -283,51 +346,32 @@ function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstra
     W_θ[1, P+3] = θ_w[1]
 
     μ_adapt = zeros(P + 3)
-    μ_adapt_w = 0.0
-    ph = similar(μ_adapt)
 
 
     for i in 2:n_MCMC
+        W_θ[i, 1:P] .= W[i,:]
+        W_θ[i, P+1] = θ_y_x[i]
+        W_θ[i, P+2] = θ_y_w[i]
+        W_θ[i, P+3] = θ_w[i]
         if rand() > ϵ
-            W_θ[i, 1:P] .= W[i,:]
-            W_θ[i, P+1] = θ_y_x[i]
-            W_θ[i, P+2] = θ_y_w[i]
-            W_θ[i, P+3] = θ_w[i]
-
-            ## Sample W, θ_y_x, θ_y_w using AGESS
+            ## Sample W, θ_y_x, θ_y_w using AGESS E(μ,Σ)
             AGESS_SingleStep(W_θ, b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
-                            ph, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
-
-            W[i,:] .= W_θ[i, 1:P]
-            θ_y_x[i] = W_θ[i, P+1]
-            θ_y_w[i] = W_θ[i, P+2]
-            θ_w[i] = W_θ[i, P+3]
-            ## Adapt parameters
-            w_i = min(1.0/(10 * P), (i^(-2/3)))
-            μ_adapt .= (1 - w_i) * μ_adapt +  w_i * W_θ[i,:]
-            Σ_chol_adapt.U .= sqrt((1 - w_i) / 2) .*  Σ_chol_adapt.U 
-            lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (W_θ[i,:] .- μ_adapt))
-            Σ_chol_adapt.U .*= sqrt(2)
+                             ph, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
         else
-            ## Sample W
-            construct_Kernel_Mat!(Σ2, X_N, exp(θ_w[i]))
-            Σ2[diagind(Σ2)] .+= g
-            cholesky!(Σ2) 
-            ESS_SingleStep(W, ph2, b -> likelihood_Y(b, X_N, Y_N, g, exp(θ_y_x[i]), exp(θ_y_w[i]), ph1, Σ1), LowerTriangular(Σ2), i)
-            ARW_SingleStep_1d(θ_y_x, b -> likelihood_Y(W[i,:], X_N, Y_N, g, exp(b), exp(θ_y_w[i]), ph1, Σ1), c ->( prior_θ(exp(c)) + c), 0.01, i, 1)
-            ARW_SingleStep_1d(θ_y_w, b -> likelihood_Y(W[i,:], X_N, Y_N, g, exp(θ_y_x[i]), exp(b), ph1, Σ1), c ->( prior_θ(exp(c)) + c), 0.01, i, 1)
-            ARW_SingleStep_1d(θ_w, b -> likelihood_W(W[i,:], X_N, exp(b), g, ph1, Σ1), c ->( prior_θ(exp(c)) + c), 0.01, i, 1)
-
-            W_θ[i, 1:P] .= W[i,:]
-            W_θ[i, P+1] = θ_y_x[i]
-            W_θ[i, P+2] = θ_y_w[i]
-            W_θ[i, P+3] = θ_w[i]
-            w_i = min(1.0/(10 * P), (i^(-2/3)))
-            μ_adapt .= (1 - w_i) * μ_adapt +  w_i * W_θ[i,:]
-            Σ_chol_adapt.U .= sqrt((1 - w_i) / 2) .*  Σ_chol_adapt.U
-            lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (W_θ[i,:] .- μ_adapt))
-            Σ_chol_adapt.U .*= sqrt(2)
+            ## Sample W, θ_y_x, θ_y_w using AGESS E(0,I)
+            AGESS_SingleStep(W_θ, b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
+                             ph, t_dist, ν, zeros(P+3), LowerTriangular(diagm(ones(P+3))), i)
         end
+        W[i,:] .= W_θ[i, 1:P]
+        θ_y_x[i] = W_θ[i, P+1]
+        θ_y_w[i] = W_θ[i, P+2]
+        θ_w[i] = W_θ[i, P+3]
+        ## Adapt parameters
+        w_i = min(1.0/(10 * P), (i^(-2/3)))
+        μ_adapt .= (1 - w_i) * μ_adapt +  w_i * W_θ[i,:]
+        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U 
+        lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (W_θ[i,:] .- μ_adapt))
+
 
         if (i % 100) == 0
             println("MCMC iter: ", i)
@@ -359,7 +403,7 @@ W = ones(100000, N_obs)
 W[1,:] .= X_N
 W[2,:] .= X_N
 
-g = 10e-8
+g = 1e-1
 θ_w = ones(100000) * 0.5
 θ_y_x = ones(100000) * 0.5
 θ_y_w = ones(100000) * 0.5
@@ -377,18 +421,41 @@ p
 p1 = plot_Var(Y_pred, time_points)
 p1
 
+p2 = plot(θ_w, ylabel = "θ_w", label = "θ_w")
+p3 = plot(θ_y_x, ylabel = "θ_y_x", label = "θ_y_x")
+p4 = plot(θ_y_w, ylabel = "θ_y_w", label = "θ_y_w")
+p5 = plot(W[90000:100000,:]', ylabel = "W", legend=false)
+plot(p, p1, p2, p3, p4, p5, layout=(3,2))
+plot!(size=(4000,2000))
+
+savefig("//Users//ndm34//Downloads//ESS_DGP2.png")
+
+g = 1e-8
+W_GESS = ones(100000, N_obs) 
+## Initialize with W = X_N
+W_GESS[1,:] .= X_N
+W_GESS[2,:] .= X_N
+
+
+θ_w_GESS = log.(ones(100000) * 0.5)
+θ_y_x_GESS = log.(ones(100000) * 0.5)
+θ_y_w_GESS = log.(ones(100000) * 0.5)
+
+
+sampler_GESS(Y_N, X_N, W_GESS, θ_w_GESS, θ_y_x_GESS, θ_y_w_GESS, g, k -> logpdf(Gamma(1,2), k),
+    zeros(N_obs + 3), diagm(ones(N_obs + 3)))
+
 
 W_AGESS = ones(100000, N_obs) 
 ## Initialize with W = X_N
 W_AGESS[1,:] .= X_N
 W_AGESS[2,:] .= X_N
 
-g = 10e-8
+
 θ_w_AGESS = log.(ones(100000) * 0.5)
 θ_y_x_AGESS = log.(ones(100000) * 0.5)
 θ_y_w_AGESS = log.(ones(100000) * 0.5)
-
-sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(2,1), k), true)
+sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), acceptance, true, ν = 3.0, ϵ = 0.1)
 
 
 time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
@@ -401,7 +468,15 @@ p
 p1 = plot_Var(Y_pred, time_points)
 p1
 
+p2 = plot(θ_w_AGESS, ylabel = "θ_w", label = "θ_w")
+p3 = plot(θ_y_x_AGESS, ylabel = "θ_y_x", label = "θ_y_x")
+p4 = plot(θ_y_w_AGESS, ylabel = "θ_y_w", label = "θ_y_w")
+p5 = plot(W_AGESS[90000:100000,:]', ylabel = "W", legend=false)
 
-function prior_g(x)
-    return pdf(InverseGaussian(2,1), x)
-end
+plot(p, p1, p2, p3, p4, p5, layout=(3,2))
+plot!(size=(4000,2000))
+
+savefig("//Users//ndm34//Downloads//AGESS_DGP_Mixture.png")
+
+
+X_N, Y_N = gen_data_Higdon(25, 0.0, 15.0)
