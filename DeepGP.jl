@@ -307,7 +307,7 @@ function sampler_GESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstrac
             log_lik = @sprintf("%.2f", likelihood_Y(W[i,:], X_N, Y_N, g, exp(θ_y_x[i]), exp(θ_y_w[i]), ph1, Σ1))
             println("Log Likelihood: ", log_lik)
         end
-        
+
         if i < n_MCMC
             W[i+1,:] .= W[i,:]
             θ_w[i+1] = θ_w[i]
@@ -344,6 +344,7 @@ function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstra
     W_θ[1, P+1] = θ_y_x[1]
     W_θ[1, P+2] = θ_y_w[1]
     W_θ[1, P+3] = θ_w[1]
+    z = zeros(P + 3)
 
     μ_adapt = zeros(P + 3)
 
@@ -355,11 +356,11 @@ function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstra
         W_θ[i, P+3] = θ_w[i]
         if rand() > ϵ
             ## Sample W, θ_y_x, θ_y_w using AGESS E(μ,Σ)
-            AGESS_SingleStep(W_θ, b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
+            AGESS_SingleStep(W_θ, z,  b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
                              ph, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
         else
             ## Sample W, θ_y_x, θ_y_w using AGESS E(0,I)
-            AGESS_SingleStep(W_θ, b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
+            AGESS_SingleStep(W_θ, z, b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
                              ph, t_dist, ν, zeros(P+3), LowerTriangular(diagm(ones(P+3))), i)
         end
         W[i,:] .= W_θ[i, 1:P]

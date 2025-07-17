@@ -1,74 +1,5 @@
 using LinearAlgebra, Random, Distributions, Printf
 
-function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, Σ::AbstractMatrix{Y}; burnin::Y = 0.5) where {Y<:AbstractFloat}
-    P = size(x)[2]
-    n_MCMC = size(x)[1]
-    z = zeros(P)
-    burnin_num = floor(Int64, burnin * n_MCMC)
-
-    Σ_chol = cholesky(Σ)
-    t1 = time()
-
-    for i in 2:n_MCMC
-        if i == burnin_num
-            t1 = time()
-        end
-        ## Propose new z from N(0, Σ)
-        z .= Σ_chol.L * randn(P)
-        @views y = log_likelihood(x[i,:]) + log(rand(1)[1])
-
-        ## Propose Initial Angle
-        θ = rand(1)[1] * 2 * π
-        θ_min = θ - 2 * π
-        θ_max = θ
-
-        ## Propose initial first move
-        x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
-        @views log_lik_prop = log_likelihood(x[i,:])
-
-        ## Check to make sure that posterior pdfs are computable
-        if isnan(log_lik_prop)
-            log_lik_prop = y - 1.0
-        end
-        if !isfinite(log_lik_prop)
-            log_lik_prop = y - 1.0
-        end
-
-        while log_lik_prop <= y
-            if θ < 0
-                θ_min = θ
-            else
-                θ_max = θ
-            end
-
-            ## Propose new angle
-            θ = θ_min + rand(1)[1] * (θ_max - θ_min)
-            x[i,:] .= x[i-1,:] .* cos(θ) .+  z .* sin(θ)
-            @views log_lik_prop = log_likelihood(x[i,:])
-
-            ## Check to make sure that posterior pdfs are computable
-            if isnan(log_lik_prop)
-                log_lik_prop = y - 1.0
-            end
-            if !isfinite(log_lik_prop)
-                log_lik_prop = y - 1.0
-            end
-        end
-        ## Populate next value in Markov Chain
-        if i < n_MCMC
-            x[i+1,:] .= x[i,:]
-        end
-
-        ## Update User
-        if (i % 25) == 0
-            println("MCMC iter: ", i)
-            log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
-            println("Log Likelihood: ", log_lik)
-        end
-    end
-
-    return time() - t1
-end
 
 function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likelihood::Function, 
                         μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
@@ -117,6 +48,87 @@ function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likeliho
     end
     
     return nothing
+end
+
+
+function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, Σ::AbstractMatrix{Y}; burnin::Y = 0.5) where {Y<:AbstractFloat}
+    P = size(x)[2]
+    n_MCMC = size(x)[1]
+    z = zeros(P)
+    burnin_num = floor(Int64, burnin * n_MCMC)
+
+    Σ_chol = cholesky(Σ)
+    t1 = time()
+
+    for i in 2:n_MCMC
+        if i == burnin_num
+            t1 = time()
+        end
+
+        ESS_SingleStep(x, z, log_likelihood, zeros(P), Σ_chol.L, i)
+
+        ## Populate next value in Markov Chain
+        if i < n_MCMC
+            x[i+1,:] .= x[i,:]
+        end
+
+        ## Update User
+        if (i % 25) == 0
+            println("MCMC iter: ", i)
+            log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
+            println("Log Likelihood: ", log_lik)
+        end
+    end
+
+    return time() - t1
+end
+
+function GESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_posterior::Function, ph::AbstractVector{Y}, 
+                         μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, i::T, ν::Y) where {Y<:AbstractFloat, T<:Integer}
+    P = size(x)[2]
+
+    α = 0.5 * (ν + P)
+    ph .= Σ_chol \ (x[i,:] - μ)
+    β = 0.5 * (ν + dot(ph,ph))
+    s = rand(InverseGamma(α, β))
+
+
+    ESS_SingleStep(x, z, b -> (log_posterior(b) - dMvT(b, μ, Σ_chol, ph, ν, P)), μ, sqrt(s) * Σ_chol, i)
+
+    return nothing
+end
+
+function GESS(x::AbstractMatrix{Y}, log_posterior::Function, μ::AbstractVector{Y}, Σ::AbstractMatrix{Y};
+              ν::Y = 6.0, burnin::Y = 0.5) where {Y<:AbstractFloat}
+    n_MCMC = size(x)[1]
+    P = size(x)[2]
+    z = zeros(P)
+    Σ_chol = cholesky(Σ)
+    ph = zeros(P)
+    burnin_num = floor(Int64, burnin * n_MCMC)
+
+    t1 = time()
+    for i in 2:n_MCMC
+        if i == burnin_num
+            t1 = time()
+        end
+
+        GESS_SingleStep(x, z, log_posterior, ph, μ, Σ_chol.L, i, ν)
+
+        ## Populate next value in Markov Chain
+        if i < n_MCMC
+            x[i+1,:] .= x[i,:]
+        end
+
+        ## Update User
+        if (i % 25) == 0
+            println("MCMC iter: ", i)
+            log_pos = @sprintf("%.2f", log_posterior(x[i,:]))
+            println("Log Posterior: ", log_pos)
+        end
+    end
+
+    return time() - t1
 end
 
 
@@ -170,12 +182,11 @@ function cond_rMvT_1d!(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
 end
     
 
-function AGESS_SingleStep(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
+function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likelihood::Function, log_prior::Function, 
                           ph::AbstractVector{Y}, t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y},
                           Σ_chol_adapt::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
 
-    z = zeros(P)
     ## Propose new z from N(μ, Σ)
     if t_dist == true
         cond_rMvT!(z, x[i,:], μ_adapt, Σ_chol_adapt, ν, ph, P)
@@ -243,16 +254,12 @@ end
 
 function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
                μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
-               t_dist::Bool, ν::Y = -1.0; burnin::Y = 0.5, ϵ::Y = 0.05) where {Y<:AbstractFloat, T<:Integer}
+               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.05) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
     n_MCMC = size(x)[1]
     z = zeros(P)
     burnin_num = floor(Int64, burnin * n_MCMC)
     t1 = time()
-
-    if ν <= 0.0
-        ν = float(P)
-    end
 
     μ_adapt = copy(μ)
     ph = similar(μ_adapt)
@@ -266,10 +273,10 @@ function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Functi
         end
 
         if rand() > ϵ
-            AGESS_SingleStep(x, log_likelihood, log_prior, ph, t_dist, ν, μ_adapt,
+            AGESS_SingleStep(x, z, log_likelihood, log_prior, ph, t_dist, ν, μ_adapt,
                              Σ_chol_adapt.L, i)
         else
-            AGESS_SingleStep(x, log_likelihood, log_prior, ph, t_dist, ν, zeros(P),
+            AGESS_SingleStep(x, z, log_likelihood, log_prior, ph, t_dist, ν, zeros(P),
                              LowerTriangular(diagm(ones(P))), i)
         end
         
@@ -379,7 +386,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         for j in 1:P
             z .= x[i,:]
             z[j] = x[i,j] + randn() * σ_rw[j]
-            @views accept_prob = (log_likelihood(z) + log_prior(z, μ, Σ_chol.L)) - (log_likelihood(x[i,:]) + log_prior(x[i,:], μ, Σ_chol.L))
+            @views accept_prob = (log_likelihood(z) + log_prior(z)) - (log_likelihood(x[i,:]) + log_prior(x[i,:]))
             if isfinite(accept_prob)
                 if log(rand()) < accept_prob
                     x[i,j] = z[j]
@@ -419,7 +426,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
 
         # Block RW update
         z = x[i,:] .+ Σ_rw * randn(P)
-        @views accept_prob = (log_likelihood(z) + log_prior(z, μ, Σ_chol.L)) - (log_likelihood(x[i,:]) + log_prior(x[i,:], μ, Σ_chol.L))
+        @views accept_prob = (log_likelihood(z) + log_prior(z)) - (log_likelihood(x[i,:]) + log_prior(x[i,:]))
         if isfinite(accept_prob)
             if log(rand()) < accept_prob
                 x[i,:] .= z
