@@ -1,4 +1,7 @@
 using KernelFunctions, LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots
+using StanBase
+set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
+using StanSample, DataFrames, Stan
 include("AGESS.jl")
 
 function gen_data(N::T, min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:Integer}
@@ -40,8 +43,8 @@ function likelihood_Y(W::AbstractVector{Y}, X::AbstractVector{Y}, Y_N::AbstractV
     construct_Kernel_Mat_y!(Σ, X, W, θ_y_x, θ_y_w)
     Σ[diagind(Σ)] .+=  g
     cholesky!(Σ)
-    ph .= LowerTriangular(Σ) \ Y_N
-    lpdf =  -sum(log.(diag(Σ)))  - (0.5 * (1 +length(ph)) * log1p(dot(ph, ph)))
+    ph .= UpperTriangular(Σ)' \ Y_N
+    lpdf =  -sum(log.(diag(Σ)))  - (0.5 * (1 + length(ph)) * log1p(dot(ph, ph)))
 
     return lpdf
 end
@@ -51,7 +54,7 @@ function likelihood_W(W::AbstractVector{Y}, X_N::AbstractVector{Y}, θ_w::Y, g::
     Σ[diagind(Σ)] .+= g
     cholesky!(Σ)
 
-    ph .= LowerTriangular(Σ) \ W
+    ph .= UpperTriangular(Σ)' \ W
     lpdf = -sum(log.(diag(Σ)))  - 0.5 * dot(ph, ph)
 
     return lpdf
@@ -145,7 +148,7 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
         cholesky!(Σ_out)
 
         ## Generate sample of W_out
-        W_out .= LowerTriangular(Σ_out) * randn(P_out) 
+        W_out .= UpperTriangular(Σ_out)' * randn(P_out) 
         W_out .+= μ_out
 
         ## Generate sample of Y_out
@@ -162,7 +165,7 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
         μ_out = ph * Y_N
 
         cholesky!(Σ)
-        ph1 .= LowerTriangular(Σ) \ Y_N
+        ph1 .= UpperTriangular(Σ)' \ Y_N
         construct_Kernel_Mat_y!(Σ_out, time_points, W_out, θ_y_x[i], θ_y_w[i])
         Σ_out[diagind(Σ_out)] .+= g
         Σ_out .-= ph * k_out_Y'
@@ -172,7 +175,7 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
         cholesky!(Σ_out)
 
         
-        Y_out[i - burnin_num,:] .= LowerTriangular(Σ_out) * randn(P_out) 
+        Y_out[i - burnin_num,:] .= UpperTriangular(Σ_out)' * randn(P_out) 
         Y_out[i - burnin_num,:] .+= μ_out
     end
 
@@ -233,7 +236,7 @@ function sampler_ESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstract
         construct_Kernel_Mat!(Σ2, X_N, θ_w[i])
         Σ2[diagind(Σ2)] .+= g
         cholesky!(Σ2) 
-        ESS_SingleStep(W, ph, b -> likelihood_Y(b, X_N, Y_N, g, θ_y_x[i], θ_y_w[i], ph1, Σ1), zeros(P), LowerTriangular(Σ2), i)
+        ESS_SingleStep(W, ph, b -> likelihood_Y(b, X_N, Y_N, g, θ_y_x[i], θ_y_w[i], ph1, Σ1), zeros(P), UpperTriangular(Σ2)', i)
 
         if (i % tuning_step) == 0
             println("MCMC iter: ", i)
@@ -326,7 +329,7 @@ end
 
 function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::AbstractMatrix{Y},
                        θ_w::AbstractVector{Y}, θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector{Y}, 
-                       g::Y, prior_θ::Function, t_dist::Bool; ν::Y = 6.0, ϵ::Y = 0.00) where {Y<:AbstractFloat, T<:Integer}
+                       g::Y, prior_θ::Function, t_dist::Bool; ν::Y = 6.0, ϵ::Y = 0.00) where {Y<:AbstractFloat}
 
     n_MCMC = size(W)[1]
     P = length(Y_N)
@@ -368,7 +371,7 @@ function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstra
         θ_y_w[i] = W_θ[i, P+2]
         θ_w[i] = W_θ[i, P+3]
         ## Adapt parameters
-        w_i = min(1.0/(10 * P), (i^(-2/3)))
+        w_i = min(1.0/(10 * P), (i^(-1)))
         μ_adapt .= (1 - w_i) * μ_adapt +  w_i * W_θ[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U 
         lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (W_θ[i,:] .- μ_adapt))
@@ -394,22 +397,251 @@ function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstra
 
 end
 
+
+
+#### Stan implementation
+model = "
+data {
+  int N;
+  real g;
+  vector[N] Y;
+  vector[N] X;
+}
+
+parameters {
+  real<lower = 0> theta_w;
+  real<lower = 0> theta_y_w;
+  real<lower = 0> theta_y_x;
+  vector[N] W;
+}
+
+model {
+  matrix[N, N] K_y;
+  for (i in 1:(N - 1)) {
+    K_y[i, i] = 1 + g;
+    for (j in (i + 1):N) {
+      K_y[i, j] = exp(- (square(X[i] - X[j]) / theta_y_x)  - (square(W[i] - W[j]) / theta_y_w));
+      K_y[j, i] = K_y[i, j];
+    }
+  }
+  K_y[N, N] = 1 + g;
+
+  matrix[N, N] K_w;
+  for (i in 1:(N - 1)) {
+    K_w[i, i] = 1 + g;
+    for (j in (i + 1):N) {
+      K_w[i, j] = exp(- (square(X[i] - X[j]) / theta_w));
+      K_w[j, i] = K_w[i, j];
+    }
+  }
+  K_w[N, N] = 1 + g;
+
+  vector[N] mu = rep_vector(0, N);
+
+  Y ~ multi_student_t(1, mu, K_y);
+  W ~ multi_normal(mu, K_w);
+  theta_w ~ gamma(1, 0.5);
+  theta_y_w ~ gamma(1, 0.5);
+  theta_y_x ~ gamma(1, 0.5);
+}
+";
+
+
+
+
 ## Generate data
 
 N_obs = 50 
 X_N, Y_N = gen_data(N_obs, -5.0, 5.0)
+g = 1e-2
+
+ESS_per_second = zeros(3, 10)
+times = zeros(3, 10)
+
+n_reps = 10
+MCMC_iters = 250000
+
+for i in 1:n_reps
+    #########################
+    ## STAN implementation ##
+    #########################
+
+    sm = SampleModel("deepGP", model);
+
+    data = Dict("N" => N_obs, "g" => g, "Y" => Y_N, "X" =>X_N);
+
+    t1 = time()
+    rc = stan_sample(sm; num_cpp_chains=1, num_chains=1,num_warmups=floor(Int, 0.5 * MCMC_iters), num_samples=floor(Int, 0.5 * MCMC_iters), data);
+    stan_time = time() - t1 
+
+    df_Stan = read_samples(sm, :array);
+
+    df_Stan = df_Stan[:,:,1]
+
+
+    ########################
+    ## ESS implementation ##
+    ########################
+
+    W = ones(MCMC_iters, N_obs) 
+    ## Initialize with W = X_N
+    W[1,:] .= X_N
+    W[2,:] .= X_N
+
+    θ_w = ones(MCMC_iters) * 0.5
+    θ_y_x = ones(MCMC_iters) * 0.5
+    θ_y_w = ones(MCMC_iters) * 0.5
+
+    t1 = time()
+    sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(1,2), k))
+    ESS_time = time() - t1 
+
+    df_ESS = hcat(θ_w, θ_y_w, θ_y_x, W)
+    df_ESS = df_ESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
+
+    #########################
+    ## GESS implementation ##
+    #########################
+
+    W_GESS = ones(MCMC_iters, N_obs) 
+    ## Initialize with W = X_N
+    W_GESS[1,:] .= X_N
+    W_GESS[2,:] .= X_N
+
+
+    θ_w_GESS = log.(ones(MCMC_iters) * 0.5)
+    θ_y_x_GESS = log.(ones(MCMC_iters) * 0.5)
+    θ_y_w_GESS = log.(ones(MCMC_iters) * 0.5)
+
+    t1 = time()
+    sampler_GESS(Y_N, X_N, W_GESS, θ_w_GESS, θ_y_x_GESS, θ_y_w_GESS, g, k -> logpdf(Gamma(1,2), k),
+        zeros(N_obs + 3), diagm(ones(N_obs + 3)))
+    GESS_time = time() - t1 
+    df_GESS = hcat(θ_w_GESS, θ_y_w_GESS, θ_y_x_GESS, W_GESS)
+    df_GESS = df_GESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
+
+    ##########################
+    ## AGESS implementation ##
+    ##########################
+
+    W_AGESS = ones(MCMC_iters, N_obs) 
+    ## Initialize with W = X_N
+    W_AGESS[1,:] .= X_N
+    W_AGESS[2,:] .= X_N
+
+
+    θ_w_AGESS = log.(ones(MCMC_iters) * 0.5)
+    θ_y_x_AGESS = log.(ones(MCMC_iters) * 0.5)
+    θ_y_w_AGESS = log.(ones(MCMC_iters) * 0.5)
+
+    t1 = time()
+    sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), true, ν = 6.0, ϵ = 0.1)
+    AGESS_time = time() - t1 
+
+    df_AGESS = hcat(θ_w_AGESS, θ_y_w_AGESS, θ_y_x_AGESS, W_AGESS)
+    df_AGESS = df_AGESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
+
+    @rput df_Stan
+    @rput df_ESS
+    @rput df_GESS
+    @rput df_AGESS
+
+    R"""
+    library(stableGR)
+    ess_ESS <- n.eff(df_ESS)$n.eff
+    ess_GESS <- n.eff(df_GESS)$n.eff
+    ess_AGESS <- n.eff(df_AGESS)$n.eff
+    ess_HMC <- n.eff(df_Stan)$n.eff
+
+    """
+
+    @rget ess_ESS
+    @rget ess_GESS
+    @rget ess_AGESS
+    @rget ess_HMC
+
+    ESS_per_second[1,i]= ess_GESS / (0.5 * GESS_time)
+    ESS_per_second[2,i] = ess_AGESS / (0.5 * AGESS_time)
+    ESS_per_second[3,i] = ess_HMC / (0.5 * stan_time)
+
+    times[1, i] = 0.5 * GESS_time
+    times[2, i] = 0.5 * AGESS_time
+    times[3, i] = 0.5 * stan_time
+
+end
+
+#########################
+## STAN implementation ##
+#########################
+
+sm = SampleModel("deepGP", model);
+
+data = Dict("N" => N_obs, "g" => g, "Y" => Y_N, "X" =>X_N);
+
+t1 = time()
+rc = stan_sample(sm; num_cpp_chains=1, num_chains=1,num_warmups=50000, num_samples=50000, data);
+stan_time = time() - t1 
+
+df = read_samples(sm, :array);
+
+
+########################
+## ESS implementation ##
+########################
 
 W = ones(100000, N_obs) 
 ## Initialize with W = X_N
 W[1,:] .= X_N
 W[2,:] .= X_N
 
-g = 1e-1
 θ_w = ones(100000) * 0.5
 θ_y_x = ones(100000) * 0.5
 θ_y_w = ones(100000) * 0.5
 
-sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(2,1), k))
+t1 = time()
+sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(1,2), k))
+ESS_time = time() - t1 
+
+
+#########################
+## GESS implementation ##
+#########################
+
+W_GESS = ones(100000, N_obs) 
+## Initialize with W = X_N
+W_GESS[1,:] .= X_N
+W_GESS[2,:] .= X_N
+
+
+θ_w_GESS = log.(ones(100000) * 0.5)
+θ_y_x_GESS = log.(ones(100000) * 0.5)
+θ_y_w_GESS = log.(ones(100000) * 0.5)
+
+t1 = time()
+sampler_GESS(Y_N, X_N, W_GESS, θ_w_GESS, θ_y_x_GESS, θ_y_w_GESS, g, k -> logpdf(Gamma(1,2), k),
+    zeros(N_obs + 3), diagm(ones(N_obs + 3)))
+GESS_time = time() - t1 
+
+##########################
+## AGESS implementation ##
+##########################
+
+W_AGESS = ones(250000, N_obs) 
+## Initialize with W = X_N
+W_AGESS[1,:] .= X_N
+W_AGESS[2,:] .= X_N
+
+
+θ_w_AGESS = log.(ones(250000) * 0.5)
+θ_y_x_AGESS = log.(ones(100000) * 0.5)
+θ_y_w_AGESS = log.(ones(100000) * 0.5)
+
+t1 = time()
+sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), true, ν = 6.0, ϵ = 0.1)
+AGESS_time = time() - t1 
+
+
+###
 
 time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
 time_points = setdiff(time_points, X_N)
@@ -431,32 +663,48 @@ plot!(size=(4000,2000))
 
 savefig("//Users//ndm34//Downloads//ESS_DGP2.png")
 
-g = 1e-8
-W_GESS = ones(100000, N_obs) 
+
+g = 1e-6
+MCMC_iters = 50000
+W = ones(MCMC_iters, N_obs) 
+## Initialize with W = X_N
+W[1,:] .= X_N
+W[2,:] .= X_N
+
+
+θ_w = (ones(MCMC_iters) * 0.5)
+θ_y_x = (ones(MCMC_iters) * 0.5)
+θ_y_w = (ones(MCMC_iters) * 0.5)
+
+
+sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(1,2), k))
+
+
+W_GESS = ones(MCMC_iters, N_obs) 
 ## Initialize with W = X_N
 W_GESS[1,:] .= X_N
 W_GESS[2,:] .= X_N
 
 
-θ_w_GESS = log.(ones(100000) * 0.5)
-θ_y_x_GESS = log.(ones(100000) * 0.5)
-θ_y_w_GESS = log.(ones(100000) * 0.5)
+θ_w_GESS = log.(ones(MCMC_iters) * 0.5)
+θ_y_x_GESS = log.(ones(MCMC_iters) * 0.5)
+θ_y_w_GESS = log.(ones(MCMC_iters) * 0.5)
 
 
 sampler_GESS(Y_N, X_N, W_GESS, θ_w_GESS, θ_y_x_GESS, θ_y_w_GESS, g, k -> logpdf(Gamma(1,2), k),
     zeros(N_obs + 3), diagm(ones(N_obs + 3)))
 
 
-W_AGESS = ones(100000, N_obs) 
+MCMC_iters = 500000
+W_AGESS = ones(MCMC_iters, N_obs) 
 ## Initialize with W = X_N
 W_AGESS[1,:] .= X_N
 W_AGESS[2,:] .= X_N
 
-
-θ_w_AGESS = log.(ones(100000) * 0.5)
-θ_y_x_AGESS = log.(ones(100000) * 0.5)
-θ_y_w_AGESS = log.(ones(100000) * 0.5)
-sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), acceptance, true, ν = 3.0, ϵ = 0.1)
+θ_w_AGESS = log.(ones(MCMC_iters) * 0.5)
+θ_y_x_AGESS = log.(ones(MCMC_iters) * 0.5)
+θ_y_w_AGESS = log.(ones(MCMC_iters) * 0.5)
+sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), true, ν = 6.0, ϵ = 0.1)
 
 
 time_points = collect(collect(LinRange(-5.0, 5.0, 500)))

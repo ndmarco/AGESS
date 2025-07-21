@@ -6,7 +6,7 @@ dir = "//Users//ndm34//Projects//AGESS_Simulation//BinaryRegression"
 ## Function to generate the data
 function generate_data(N::T, P::T, ν::Y = 6.0) where {Y<:AbstractFloat, T<:Integer}
     β = randn(P) * (2 * log(P))^(1.0 / 4)
-    β .*= sqrt(rand(Gamma(ν/2,2/ ν)))
+    β .*= sqrt(rand(Gamma(ν/2, 2/ ν)))
     x = randn(N, P) .+ randn() * 0.5
     μ = zeros(N)
     y = zeros(N)
@@ -204,39 +204,39 @@ for j in 1:3
 end
 
 ESS_2 = [ESS_per_second_ESS[1,:]'; ESS_per_second_GESS[1,:]'; ESS_per_second_AGESS[1,:]'; ESS_per_second_ARW[1,:]']
-scatter1 = scatter(percent_zero[1,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 2)", )
+scatter1 = scatter(percent_zero[1,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 2)", yscale=:log10, yticks = [100, 1000, 10000], ylims = [100, 12000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 xlabel!("Proportion of μ that are zero")
-box1 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size (P = 2)")
+box1 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size (P = 2)", legend = false, yscale=:log10, yticks = [100, 1000, 10000], ylims = [100, 12000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 
 ESS_2 = [median_ESS_per_second_ESS[1,:]'; median_ESS_per_second_GESS[1,:]'; median_ESS_per_second_AGESS[1,:]'; median_ESS_per_second_ARW[1,:]']
-box1_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 2)")
+box1_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 2)", legend = false)
 ylabel!("Effective Sample Size per Second")
 
 ESS_2 = [ESS_per_second_ESS[2,:]'; ESS_per_second_GESS[2,:]'; ESS_per_second_AGESS[2,:]'; ESS_per_second_ARW[2,:]']
-scatter2 = scatter(percent_zero[2,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 10)", )
+scatter2 = scatter(percent_zero[2,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 10)", yscale=:log10, yticks = [10, 100, 1000, 10000], ylims = [10, 10000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 xlabel!("Proportion of μ that are zero")
-box2 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 10)")
+box2 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 10)", legend = false, yscale=:log10, yticks = [10, 100, 1000, 10000], ylims = [10, 10000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 
 ESS_2 = [median_ESS_per_second_ESS[2,:]'; median_ESS_per_second_GESS[2,:]'; median_ESS_per_second_AGESS[2,:]'; median_ESS_per_second_ARW[2,:]']
-box2_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 10)")
+box2_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 10)", legend = false)
 ylabel!("Effective Sample Size per Second")
 
 
 
 ESS_2 = [ESS_per_second_ESS[3,:]'; ESS_per_second_GESS[3,:]'; ESS_per_second_AGESS[3,:]'; ESS_per_second_ARW[3,:]']
-scatter3 = scatter(percent_zero[3,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 50)", )
+scatter3 = scatter(percent_zero[3,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 50)", yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 xlabel!("Proportion of μ that are zero")
-box3 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 50)")
+box3 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 50)", legend = false, yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 
 ESS_2 = [median_ESS_per_second_ESS[3,:]'; median_ESS_per_second_GESS[3,:]'; median_ESS_per_second_AGESS[3,:]'; median_ESS_per_second_ARW[3,:]']
-box3_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 50)")
+box3_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 50)", legend = false, yscale=:log10)
 ylabel!("Effective Sample Size per Second")
 
-plot(box1_single, box1, scatter1, box2_single, box2, scatter2, box3_single, box3, scatter3, layout = (3,3))
-plot!(size = (1000,1000))
+plot(box1, scatter1, box2, scatter2, box3, scatter3, layout = (3,2),margin= 10Plots.mm)
+plot!(size = (2000,1500))
