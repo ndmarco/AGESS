@@ -2,7 +2,7 @@ using LinearAlgebra, Random, Distributions, Printf
 
 
 function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likelihood::Function, 
-                        μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
+                        μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
 
     ## Propose new z from N(0, Σ)
@@ -84,7 +84,7 @@ function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, μ::AbstractVector{
 end
 
 function GESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_posterior::Function, ph::AbstractVector{Y}, 
-                         μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, i::T, ν::Y) where {Y<:AbstractFloat, T<:Integer}
+                         μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T, ν::Y) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
 
     α = 0.5 * (ν + P)
@@ -133,14 +133,14 @@ end
 
 
 
-function dMvT(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, 
+function dMvT(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, 
               ph::AbstractVector{Y}, ν::Y, P::T) where {Y<:AbstractFloat, T<:Integer}
     ph .= ((Σ_chol) \ (x .- μ))
     pdf = -(ν + P) * 0.5 * log1p((dot(ph, ph) / ν))
     return pdf
 end
 
-function dMvN(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, Matrix{Y}}, 
+function dMvN(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, 
               ph::AbstractVector{Y}) where {Y<:AbstractFloat}
     ph .= ((Σ_chol) \ (x .- μ))
     pdf = dot(ph, ph)
@@ -148,7 +148,7 @@ function dMvN(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangu
 end
 
 function cond_rMvT!(z::AbstractVector{Y}, x::AbstractVector{Y}, μ::AbstractVector{Y}, 
-                    Σ_chol::LowerTriangular{Y, Matrix{Y}}, ν::Y, ph::AbstractVector{Y}, P::T) where {Y<:AbstractFloat, T<:Integer}
+                    Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, ν::Y, ph::AbstractVector{Y}, P::T) where {Y<:AbstractFloat, T<:Integer}
     z .= Σ_chol * randn(P) 
     ph .= ((Σ_chol) \ (x .- μ))
     d = dot(ph, ph)
@@ -184,7 +184,7 @@ end
 
 function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likelihood::Function, log_prior::Function, 
                           ph::AbstractVector{Y}, t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y},
-                          Σ_chol_adapt::LowerTriangular{Y, Matrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
+                          Σ_chol_adapt::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
 
     ## Propose new z from N(μ, Σ)

@@ -1,6 +1,6 @@
 using StanBase
-set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-
+#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
+set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity
