@@ -51,7 +51,7 @@ function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likeliho
 end
 
 
-function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, Σ::AbstractMatrix{Y}; burnin::Y = 0.5) where {Y<:AbstractFloat}
+function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, μ::AbstractVector{Y}, Σ::AbstractMatrix{Y}; burnin::Y = 0.5) where {Y<:AbstractFloat}
     P = size(x)[2]
     n_MCMC = size(x)[1]
     z = zeros(P)
@@ -65,7 +65,7 @@ function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, Σ::AbstractMatrix{
             t1 = time()
         end
 
-        ESS_SingleStep(x, z, log_likelihood, zeros(P), Σ_chol.L, i)
+        ESS_SingleStep(x, z, log_likelihood, μ, Σ_chol.L, i)
 
         ## Populate next value in Markov Chain
         if i < n_MCMC
@@ -254,7 +254,7 @@ end
 
 function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
                μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
-               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.05) where {Y<:AbstractFloat, T<:Integer}
+               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
     n_MCMC = size(x)[1]
     z = zeros(P)
@@ -281,7 +281,7 @@ function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Functi
         end
         
         ## Adapt mean and covariance
-        w_i = min(1.0/(10 * P), i^(-2/3))
+        w_i = min(1.0/(10 * P), i^(-1))
         μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
         lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))

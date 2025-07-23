@@ -70,6 +70,7 @@ P_vec = [2, 10, 50]
 Random.seed!(1234)
 for j in 1:3
     Σ = diagm(ones(P_vec[j]))
+    μ_j = zeros(P_vec[j])
     for i in 1:100
         if !isfile(string(dir ,"//", P_vec[j], "_Cov//Sim", i,".jld2"))
             Random.seed!(i)
@@ -79,31 +80,28 @@ for j in 1:3
             ## Elliptical Slice Sampling
             β_samp_ESS = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_ESS = ESS(β_samp_ESS, β -> log_likelihood(β, x, y), Σ)
+            time_non_burnin_ESS = ESS(β_samp_ESS, β -> log_likelihood(β, x, y), μ_j, Σ)
             total_time_ESS = time() - t2
             
 
             ## Generalized Elliptical Slice Sampling
             β_samp_GESS = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            μ1 = zeros(P_vec[j])
-            time_non_burnin_GESS = GESS(β_samp_GESS, β -> (log_likelihood(β, x, y) + log_prior(β)), μ1, Σ)
+            time_non_burnin_GESS = GESS(β_samp_GESS, β -> (log_likelihood(β, x, y) + log_prior(β)), μ_j, Σ)
             total_time_GESS = time() - t2
 
 
             ## Adaptive Generalized Elliptical Slice Sampling
             β_samp_AGESS = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            μ1 = zeros(P_vec[j])
-            time_non_burnin_AGESS = AGESS(β_samp_AGESS, β -> log_likelihood(β, x, y), log_prior, μ1, Σ, true)
+            time_non_burnin_AGESS = AGESS(β_samp_AGESS, β -> log_likelihood(β, x, y), log_prior, μ_j, Σ, true)
             total_time_AGESS = time() - t2
             
 
             ## Adaptive Random Walk
             β_samp_ARW = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            μ1 = zeros(P_vec[j])
-            time_non_burnin_ARW = ARW(β_samp_ARW, β -> log_likelihood(β, x, y), log_prior, 1000, 0.01, μ1, Σ)
+            time_non_burnin_ARW = ARW(β_samp_ARW, β -> log_likelihood(β, x, y), log_prior, 1000, 0.01, μ_j, Σ)
             total_time_ARW = time() - t2
             
 
