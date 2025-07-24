@@ -254,7 +254,7 @@ end
 
 function AGESS(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function, 
                μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
-               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1) where {Y<:AbstractFloat, T<:Integer}
+               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1) where {Y<:AbstractFloat}
     P = size(x)[2]
     n_MCMC = size(x)[1]
     z = zeros(P)
