@@ -7,9 +7,9 @@ dir = "//Users//ndm34//Projects//AGESS_Simulation//BinaryRegression"
 function generate_data(N::T, P::T, ν::Y = 6.0) where {Y<:AbstractFloat, T<:Integer}
     β = randn(P) * (2 * log(P))^(1.0 / 4)
     β .*= sqrt(rand(Gamma(ν/2, 2/ ν)))
-    x = randn(N, P) .+ randn() * 0.5
+    x::Matrix{typeof(ν)} = randn(N, P) .+ randn() * 0.5
     μ = zeros(N)
-    y = zeros(N)
+    y::Vector{typeof(N)} = zeros(Int64, N)
 
     for i in 1:N
         μ[i] = max(0, dot(x[i,:], β))
@@ -21,20 +21,30 @@ function generate_data(N::T, P::T, ν::Y = 6.0) where {Y<:AbstractFloat, T<:Inte
 end
 
 ## Likelihood
-function log_likelihood(β::AbstractVector{Y}, x::AbstractMatrix{Y}, y::AbstractVector{Y}) where {Y <:AbstractFloat}
-    log_lik = 0
+function log_likelihood(β::AbstractVector{Y}, x::Matrix{Y}, y::Vector{T})::Float64 where {Y <:AbstractFloat, T<:Integer}
+    log_lik::Float64 = 0.0
+    z::Float64 = 0.0
     for i in eachindex(y)
-        p = logistic(max(0, dot(x[i,:], β)))
-        log_lik += y[i] * log(p) + (1 - y[i]) * log(1-p)
+        @views z = dot(x[i,:], β)
+        if z < 0.0
+            z = 0.0
+        end
+        log_lik -= log1p(exp(-(sign(y[i] - 0.5) * z)))
     end
 
     return log_lik
 end
 
 ## Prior on β
-function log_prior(β::AbstractVector{Y}) where {Y <:AbstractFloat}
-    log_p = -0.5 * dot(β, β)
+function log_prior(β::AbstractVector{Y})::Float64 where {Y <:AbstractFloat}
+    log_p::Float64 = -0.5 * dot(β, β)
     return log_p
+end
+
+
+function log_posterior(β::AbstractVector{Y}, x::Matrix{Y}, y::Vector{T})::Float64 where {Y <:AbstractFloat, T<:Integer}
+    log_lik::Float64 = log_likelihood(β, x, y) + log_prior(β)
+    return log_lik
 end
 
 ### Run Simulation
@@ -94,7 +104,7 @@ for j in 1:3
             ## Adaptive Generalized Elliptical Slice Sampling
             β_samp_AGESS = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_AGESS = AGESS(β_samp_AGESS, β -> log_likelihood(β, x, y), log_prior, μ_j, Σ, true)
+            time_non_burnin_AGESS = AGESS(β_samp_AGESS, β -> log_posterior(β, x, y), μ_j, Σ, true)
             total_time_AGESS = time() - t2
             
 
@@ -117,33 +127,17 @@ for j in 1:3
 
             R"""
             library(stableGR)
+            library(mcmcse)
             ess_ESS <- n.eff(β_samp_ESS_1)$n.eff
             ess_GESS <- n.eff(β_samp_GESS_1)$n.eff
             ess_AGESS <- n.eff(β_samp_AGESS_1)$n.eff
             ess_ARW <- n.eff(β_samp_ARW_1)$n.eff
-
-            ess <- matrix(0, 4, ncol(β_samp_ESS_1))
-            for(p in 1:ncol(β_samp_ESS_1)){
-                ess[1, p] <- n.eff(β_samp_ESS_1[,p])$n.eff
-                ess[2, p] <- n.eff(β_samp_GESS_1[,p])$n.eff
-                ess[3, p] <- n.eff(β_samp_AGESS_1[,p])$n.eff
-                ess[4, p] <- n.eff(β_samp_ARW_1[,p])$n.eff
-            }
-
-            median_ess_ESS <- median(ess[1,])
-            median_ess_GESS <- median(ess[2,])
-            median_ess_AGESS <- median(ess[3,])
-            median_ess_ARW <- median(ess[4,])
             """
 
             @rget ess_ESS
             @rget ess_GESS
             @rget ess_AGESS
             @rget ess_ARW
-            @rget median_ess_ESS
-            @rget median_ess_GESS
-            @rget median_ess_AGESS
-            @rget median_ess_ARW
 
 
             # Save output of Simulation
@@ -163,10 +157,6 @@ for j in 1:3
                                                                            "Eff_SS_GESS" => ess_GESS,
                                                                            "Eff_SS_AGESS" => ess_AGESS,
                                                                            "Eff_SS_ARW" => ess_ARW,
-                                                                           "Median_Eff_SS_ESS" => median_ess_ESS,
-                                                                           "Median_Eff_SS_GESS" => median_ess_GESS,
-                                                                           "Median_Eff_SS_AGESS" => median_ess_AGESS,
-                                                                           "Median_Eff_SS_ARW" => median_ess_ARW,
                                                                            "β" => β,
                                                                            "x" => x,
                                                                            "μ" => μ,
@@ -192,11 +182,6 @@ for j in 1:3
             ESS_per_second_GESS[j,i] = sim["Eff_SS_GESS"] / sim["time_non_burnin_GESS"]
             ESS_per_second_AGESS[j,i] = sim["Eff_SS_AGESS"] / sim["time_non_burnin_AGESS"]
             ESS_per_second_ARW[j,i] = sim["Eff_SS_ARW"] / sim["time_non_burnin_ARW"]
-
-            median_ESS_per_second_ESS[j,i] = sim["Median_Eff_SS_ESS"] / sim["time_non_burnin_ESS"]
-            median_ESS_per_second_GESS[j,i] = sim["Median_Eff_SS_GESS"] / sim["time_non_burnin_GESS"]
-            median_ESS_per_second_AGESS[j,i] = sim["Median_Eff_SS_AGESS"] / sim["time_non_burnin_AGESS"]
-            median_ESS_per_second_ARW[j,i] = sim["Median_Eff_SS_ARW"] / sim["time_non_burnin_ARW"]
         end
     end
 end
@@ -208,9 +193,6 @@ xlabel!("Proportion of μ that are zero")
 box1 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size (P = 2)", legend = false, yscale=:log10, yticks = [100, 1000, 10000], ylims = [100, 12000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 
-ESS_2 = [median_ESS_per_second_ESS[1,:]'; median_ESS_per_second_GESS[1,:]'; median_ESS_per_second_AGESS[1,:]'; median_ESS_per_second_ARW[1,:]']
-box1_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 2)", legend = false)
-ylabel!("Effective Sample Size per Second")
 
 ESS_2 = [ESS_per_second_ESS[2,:]'; ESS_per_second_GESS[2,:]'; ESS_per_second_AGESS[2,:]'; ESS_per_second_ARW[2,:]']
 scatter2 = scatter(percent_zero[2,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 10)", yscale=:log10, yticks = [10, 100, 1000, 10000], ylims = [10, 10000], markerstrokewidth=0)
@@ -219,9 +201,6 @@ xlabel!("Proportion of μ that are zero")
 box2 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 10)", legend = false, yscale=:log10, yticks = [10, 100, 1000, 10000], ylims = [10, 10000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 
-ESS_2 = [median_ESS_per_second_ESS[2,:]'; median_ESS_per_second_GESS[2,:]'; median_ESS_per_second_AGESS[2,:]'; median_ESS_per_second_ARW[2,:]']
-box2_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 10)", legend = false)
-ylabel!("Effective Sample Size per Second")
 
 
 
@@ -232,9 +211,6 @@ xlabel!("Proportion of μ that are zero")
 box3 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 50)", legend = false, yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0)
 ylabel!("Effective Sample Size per Second")
 
-ESS_2 = [median_ESS_per_second_ESS[3,:]'; median_ESS_per_second_GESS[3,:]'; median_ESS_per_second_AGESS[3,:]'; median_ESS_per_second_ARW[3,:]']
-box3_single = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Univariate Median Effective Sample Size (P = 50)", legend = false, yscale=:log10)
-ylabel!("Effective Sample Size per Second")
 
 plot(box1, scatter1, box2, scatter2, box3, scatter3, layout = (3,2),margin= 10Plots.mm)
 plot!(size = (2000,1500))

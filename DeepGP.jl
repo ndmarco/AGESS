@@ -180,7 +180,7 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
 
         
         Y_out[iter,:] .= UpperTriangular(Σ_out)' * randn(P_out)
-        Y_out[iter,:] .*= 1 / sqrt(rand(Gamma(ν_y / 2, 2 / ν_y)))
+        Y_out[iter,:] .*= 1 / sqrt(rand(Gamma((ν_y + P) / 2, 2 / (ν_y + P))))
         Y_out[iter,:] .+= μ_out
         iter = iter + 1
     end
@@ -332,78 +332,6 @@ function sampler_GESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::Abstrac
     θ_y_w .= exp.(θ_y_w)
 
     return nothing
-end
-
-function sampler_AGESS(Y_N::AbstractVector{Y}, X_N::AbstractVector{Y}, W::AbstractMatrix{Y},
-                       θ_w::AbstractVector{Y}, θ_y_x::AbstractVector{Y}, θ_y_w::AbstractVector{Y}, 
-                       g::Y, prior_θ::Function, t_dist::Bool; ν::Y = 6.0, ν_y::Y = 6.0, ϵ::Y = 0.1) where {Y<:AbstractFloat}
-
-    n_MCMC = size(W)[1]
-    P = length(Y_N)
-
-    Σ2 = diagm(ones(P))
-    Σ1 = diagm(ones(P))
-    Σ_chol_adapt = cholesky(diagm(ones(P+3)))
-    ph = ones(P + 3)
-    ph1 = ones(P)
-    ph2 = ones(P)
-    println(ν)
-
-    W_θ = zeros(n_MCMC, P + 3)
-    W_θ[1, 1:P] .= W[1,:]
-    W_θ[1, P+1] = θ_y_x[1]
-    W_θ[1, P+2] = θ_y_w[1]
-    W_θ[1, P+3] = θ_w[1]
-    z = zeros(P + 3)
-
-    μ_adapt = zeros(P + 3)
-
-
-    for i in 2:n_MCMC
-        W_θ[i, 1:P] .= W[i,:]
-        W_θ[i, P+1] = θ_y_x[i]
-        W_θ[i, P+2] = θ_y_w[i]
-        W_θ[i, P+3] = θ_w[i]
-        if rand() > ϵ
-            ## Sample W, θ_y_x, θ_y_w using AGESS E(μ,Σ)
-            AGESS_SingleStep(W_θ, z,  b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1, ν_y) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
-                             ph, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
-        else
-            ## Sample W, θ_y_x, θ_y_w using AGESS E(0,I)
-            AGESS_SingleStep(W_θ, z, b -> likelihood_Y(b[1:P], X_N, Y_N, g, exp(b[P+1]), exp(b[P+2]), ph1, Σ1, ν_y) , c -> (likelihood_W(c[1:P], X_N, exp(c[P+3]), g, ph2, Σ2) + prior_θ(exp(c[P+1])) + c[P+1] + prior_θ(exp(c[P+2])) + c[P+2] + prior_θ(exp(c[P+3])) + c[P+3]), 
-                             ph, t_dist, ν, zeros(P+3), LowerTriangular(diagm(ones(P+3))), i)
-        end
-        W[i,:] .= W_θ[i, 1:P]
-        θ_y_x[i] = W_θ[i, P+1]
-        θ_y_w[i] = W_θ[i, P+2]
-        θ_w[i] = W_θ[i, P+3]
-        ## Adapt parameters
-        w_i = min(1.0/(10 * P), (i^(-1)))
-        μ_adapt .= (1 - w_i) * μ_adapt +  w_i * W_θ[i,:]
-        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U 
-        lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (W_θ[i,:] .- μ_adapt))
-
-
-        if (i % 100) == 0
-            println("MCMC iter: ", i)
-            log_lik = @sprintf("%.2f", likelihood_Y(W[i,:], X_N, Y_N, g, exp(θ_y_x[i]), exp(θ_y_w[i]), ph1, Σ1, ν_y))
-            println("Log Likelihood: ", log_lik)
-        end
-
-        ## Update next state
-        if i < n_MCMC
-            W[i+1,:] .= W[i,:]
-            θ_w[i+1] = θ_w[i]
-            θ_y_x[i+1] = θ_y_x[i]
-            θ_y_w[i+1] = θ_y_w[i]
-        end
-    end
-    θ_w .= exp.(θ_w)
-    θ_y_x .= exp.(θ_y_x)
-    θ_y_w .= exp.(θ_y_w)
-
-    return nothing
-
 end
 
 
@@ -701,6 +629,11 @@ plot!(size=(4000,2000))
 savefig("//Users//ndm34//Downloads//ESS_DGP2.png")
 
 
+
+#############################
+#### Small Nugget ###########
+#############################
+
 g = 1e-6
 MCMC_iters = 500000
 W = ones(MCMC_iters, N_obs) 
@@ -717,33 +650,78 @@ W[2,:] .= X_N
 sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(1,2), k))
 
 
-W_GESS = ones(MCMC_iters, N_obs) 
+W_GESS = ones(MCMC_iters, N_obs + 3) 
 ## Initialize with W = X_N
-W_GESS[1,:] .= X_N
-W_GESS[2,:] .= X_N
+W_GESS[1,1:N_obs] .= X_N
+W_GESS[2,1:N_obs] .= X_N
 
+W_GESS[1:2,N_obs + 1] .= log(0.5)
+W_GESS[1:2,N_obs + 2] .= log(0.5)
+W_GESS[1:2,N_obs + 3] .= log(0.5)
 
-θ_w_GESS = log.(ones(MCMC_iters) * 0.5)
-θ_y_x_GESS = log.(ones(MCMC_iters) * 0.5)
-θ_y_w_GESS = log.(ones(MCMC_iters) * 0.5)
+μ_0 = zeros(N_obs + 3)
+Σ_0 = diagm(ones(N_obs + 3))
+ph1 = ones(N_obs)
+Σ1 = diagm(ones(N_obs))
+ph2 = ones(N_obs)
+Σ2 = diagm(ones(N_obs))
+ν_y = 6.0
 
-
-sampler_GESS(Y_N, X_N, W_GESS, θ_w_GESS, θ_y_x_GESS, θ_y_w_GESS, g, k -> logpdf(Gamma(1,2), k),
-    zeros(N_obs + 3), diagm(ones(N_obs + 3)))
-
-
-MCMC_iters = 10000000
-W_AGESS = ones(MCMC_iters, N_obs) 
-## Initialize with W = X_N
-W_AGESS[1,:] .= X_N
-W_AGESS[2,:] .= X_N
-
-θ_w_AGESS = log.(ones(MCMC_iters) * 0.5)
-θ_y_x_AGESS = log.(ones(MCMC_iters) * 0.5)
-θ_y_w_AGESS = log.(ones(MCMC_iters) * 0.5)
 t1 = time()
-sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), true, ν = 6.0, ϵ = 0.1)
-time_AGESS = t1 - time()
+
+
+GESS(W_GESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
+likelihood_W(b[1:N_obs], X_N, exp(b[N_obs+3]), g, ph2, Σ2) + logpdf(Gamma(1,2), exp(b[N_obs+1])) + 
+b[N_obs+1] + logpdf(Gamma(1,2), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1,2), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0,)
+time_GESS = time() - t1
+
+time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
+time_points = setdiff(time_points, X_N)
+Y_pred_GESS = predictive_draws(time_points, W_GESS[:,1:N_obs], exp.(W_GESS[:,N_obs + 3]), exp.(W_GESS[:,N_obs + 1]), exp.(W_GESS[:,N_obs + 2]), g, Y_N, X_N, 6.0, burnin = 0.2)
+truth = gen_data(time_points)
+p3_GESS = plot_CI(Y_N, X_N, Y_pred_GESS, time_points, truth)
+p3_GESS
+
+p4_GESS = plot_Var(Y_pred_GESS, time_points)
+p4_GESS
+
+
+MCMC_iters = 500000
+W_AGESS = ones(MCMC_iters, N_obs + 3) 
+## Initialize with W = X_N
+W_AGESS[1,1:N_obs] .= X_N
+W_AGESS[2,1:N_obs] .= X_N
+
+W_AGESS[1:2,N_obs + 1] .= log(0.5)
+W_AGESS[1:2,N_obs + 2] .= log(0.5)
+W_AGESS[1:2,N_obs + 3] .= log(0.5)
+
+μ_0 = zeros(N_obs + 3)
+Σ_0 = diagm(ones(N_obs + 3))
+ph1 = ones(N_obs)
+Σ1 = diagm(ones(N_obs))
+ph2 = ones(N_obs)
+Σ2 = diagm(ones(N_obs))
+ν_y = 6.0
+
+t1 = time()
+
+AGESS(W_AGESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
+                    likelihood_W(b[1:N_obs], X_N, exp(b[N_obs+3]), g, ph2, Σ2) + logpdf(Gamma(1,2), exp(b[N_obs+1])) + 
+                    b[N_obs+1] + logpdf(Gamma(1,2), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1,2), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0, true)
+time_AGESS = time() - t1
+
+time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
+time_points = setdiff(time_points, X_N)
+
+Y_pred = predictive_draws(time_points, W_AGESS[:,1:N_obs], exp.(W_AGESS[:,N_obs + 3]), exp.(W_AGESS[:,N_obs + 1]), exp.(W_AGESS[:,N_obs + 2]), g, Y_N, X_N, 6.0)
+truth = gen_data(time_points)
+p = plot_CI(Y_N, X_N, Y_pred, time_points, truth)
+p
+
+p1 = plot_Var(Y_pred, time_points)
+p1
+
 
 time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
 time_points = setdiff(time_points, X_N)
