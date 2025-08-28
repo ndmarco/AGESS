@@ -336,7 +336,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
     end
 
-    return time() - t1
+    return time() - t1, Σ_chol_adapt.L * Σ_chol_adapt.U
 end
 
 function AGESS_SingleStep_1d(x::AbstractMatrix{Y}, log_posterior::Function, 

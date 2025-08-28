@@ -1,7 +1,8 @@
 using LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots
 
 include("AGESS.jl")
-dir = "//Users//ndm34//Projects//AGESS_Simulation//BinaryRegression"
+#dir = "//Users//ndm34//Projects//AGESS_Simulation//BinaryRegression"
+dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\BinaryRegression"
 
 ## Function to generate the data
 function generate_data(N::T, P::T, ν::Y = 6.0) where {Y<:AbstractFloat, T<:Integer}
@@ -70,10 +71,6 @@ ESS_per_second_ESS = zeros(3,100)
 ESS_per_second_GESS = zeros(3,100)
 ESS_per_second_AGESS = zeros(3,100)
 ESS_per_second_ARW = zeros(3, 100)
-median_ESS_per_second_ESS = zeros(3,100)
-median_ESS_per_second_GESS = zeros(3,100)
-median_ESS_per_second_AGESS = zeros(3,100)
-median_ESS_per_second_ARW = zeros(3, 100)
 
 P_vec = [2, 10, 50]
 
@@ -97,14 +94,14 @@ for j in 1:3
             ## Generalized Elliptical Slice Sampling
             β_samp_GESS = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_GESS = GESS(β_samp_GESS, β -> (log_likelihood(β, x, y) + log_prior(β)), μ_j, Σ)
+            time_non_burnin_GESS = GESS(β_samp_GESS,  β -> log_posterior(β, x, y), μ_j, Σ)
             total_time_GESS = time() - t2
 
 
             ## Adaptive Generalized Elliptical Slice Sampling
             β_samp_AGESS = zeros(5000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_AGESS = AGESS(β_samp_AGESS, β -> log_posterior(β, x, y), μ_j, Σ, true)
+            time_non_burnin_AGESS, Σ_adapt = AGESS(β_samp_AGESS, β -> log_posterior(β, x, y), μ_j, Σ, true)
             total_time_AGESS = time() - t2
             
 
@@ -116,22 +113,26 @@ for j in 1:3
             
 
             ## Get Multivariate Effective Sample Size using R package "stableGR"
-            β_samp_ESS_1 = β_samp_ESS[2500*P_vec[j]:5000*P_vec[j],:]
-            β_samp_GESS_1 = β_samp_GESS[2500*P_vec[j]:5000*P_vec[j],:]
-            β_samp_AGESS_1 = β_samp_AGESS[2500*P_vec[j]:5000*P_vec[j],:]
-            β_samp_ARW_1 = β_samp_ARW[2500*P_vec[j]:5000*P_vec[j],:]
-            @rput β_samp_ESS_1
-            @rput β_samp_AGESS_1
-            @rput β_samp_GESS_1
-            @rput β_samp_ARW_1
+            beta_samp_ESS_1 = β_samp_ESS[2500*P_vec[j]:5000*P_vec[j],:]
+            beta_samp_GESS_1 = β_samp_GESS[2500*P_vec[j]:5000*P_vec[j],:]
+            beta_samp_AGESS_1 = β_samp_AGESS[2500*P_vec[j]:5000*P_vec[j],:]
+            beta_samp_ARW_1 = β_samp_ARW[2500*P_vec[j]:5000*P_vec[j],:]
+            @rput beta_samp_ESS_1
+            @rput beta_samp_AGESS_1
+            @rput beta_samp_GESS_1
+            @rput beta_samp_ARW_1
 
             R"""
-            library(stableGR)
             library(mcmcse)
-            ess_ESS <- n.eff(β_samp_ESS_1)$n.eff
-            ess_GESS <- n.eff(β_samp_GESS_1)$n.eff
-            ess_AGESS <- n.eff(β_samp_AGESS_1)$n.eff
-            ess_ARW <- n.eff(β_samp_ARW_1)$n.eff
+            mats = rbind(beta_samp_ESS_1, beta_samp_AGESS_1, beta_samp_GESS_1, beta_samp_ARW_1)
+            sigma = mcse.multi(beta_samp_ESS_1)$cov
+            ess_ESS <- multiESS(mats, covmat = sigma) / 4
+            sigma = mcse.multi(beta_samp_GESS_1)$cov
+            ess_GESS <- multiESS(mats, covmat = sigma) / 4
+            sigma = mcse.multi(beta_samp_AGESS_1)$cov
+            ess_AGESS <- multiESS(mats, covmat = sigma) / 4
+            sigma = mcse.multi(beta_samp_ARW_1)$cov
+            ess_ARW <- multiESS(mats, covmat = sigma) / 4
             """
 
             @rget ess_ESS
@@ -168,11 +169,6 @@ for j in 1:3
             ESS_per_second_GESS[j,i] = ess_GESS / time_non_burnin_GESS
             ESS_per_second_AGESS[j,i] = ess_AGESS / time_non_burnin_AGESS
             ESS_per_second_ARW[j,i] = ess_ARW / time_non_burnin_ARW
-
-            median_ESS_per_second_ESS[j,i] = median_ess_ESS / time_non_burnin_ESS
-            median_ESS_per_second_GESS[j,i] = median_ess_GESS / time_non_burnin_GESS
-            median_ESS_per_second_AGESS[j,i] = median_ess_AGESS / time_non_burnin_AGESS
-            median_ESS_per_second_ARW[j,i] = median_ess_ARW / time_non_burnin_ARW
             
         else
             sim = load(string(dir ,"//", P_vec[j], "_Cov//Sim", i,".jld2")) 
@@ -186,31 +182,32 @@ for j in 1:3
     end
 end
 
+colors = [:red :blue :green :purple]
 ESS_2 = [ESS_per_second_ESS[1,:]'; ESS_per_second_GESS[1,:]'; ESS_per_second_AGESS[1,:]'; ESS_per_second_ARW[1,:]']
-scatter1 = scatter(percent_zero[1,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 2)", yscale=:log10, yticks = [100, 1000, 10000], ylims = [100, 12000], markerstrokewidth=0)
+scatter1 = scatter(percent_zero[1,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 2)", yscale=:log10, yticks = [100, 1000, 10000, 100000], ylims = [100, 100000], markerstrokewidth=0, color=colors, legend = false)
 ylabel!("Effective Sample Size per Second")
 xlabel!("Proportion of μ that are zero")
-box1 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size (P = 2)", legend = false, yscale=:log10, yticks = [100, 1000, 10000], ylims = [100, 12000], markerstrokewidth=0)
+box1 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size (P = 2)", legend = false, yscale=:log10, yticks = [100, 1000, 10000, 100000], ylims = [100, 100000], markerstrokewidth=0, color=colors)
 ylabel!("Effective Sample Size per Second")
 
 
 ESS_2 = [ESS_per_second_ESS[2,:]'; ESS_per_second_GESS[2,:]'; ESS_per_second_AGESS[2,:]'; ESS_per_second_ARW[2,:]']
-scatter2 = scatter(percent_zero[2,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 10)", yscale=:log10, yticks = [10, 100, 1000, 10000], ylims = [10, 10000], markerstrokewidth=0)
+scatter2 = scatter(percent_zero[2,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 10)", yscale=:log10, yticks = [10, 100, 1000, 10000, 100000], ylims = [10, 100000], markerstrokewidth=0, color=colors, legend = false)
 ylabel!("Effective Sample Size per Second")
 xlabel!("Proportion of μ that are zero")
-box2 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 10)", legend = false, yscale=:log10, yticks = [10, 100, 1000, 10000], ylims = [10, 10000], markerstrokewidth=0)
+box2 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 10)", legend = false, yscale=:log10, yticks = [10, 100, 1000, 10000, 100000], ylims = [10, 100000], markerstrokewidth=0, color=colors)
 ylabel!("Effective Sample Size per Second")
-
-
 
 
 ESS_2 = [ESS_per_second_ESS[3,:]'; ESS_per_second_GESS[3,:]'; ESS_per_second_AGESS[3,:]'; ESS_per_second_ARW[3,:]']
-scatter3 = scatter(percent_zero[3,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 50)", yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0)
+scatter3 = scatter(percent_zero[3,:], ESS_2', label=["ESS" "GESS" "AGESS" "ARW"], title = "Effective Sample Size per Second (P = 50)", yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0, color=colors, legend = false)
 ylabel!("Effective Sample Size per Second")
 xlabel!("Proportion of μ that are zero")
-box3 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 50)", legend = false, yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0)
+box3 = boxplot(["ESS" "GESS" "AGESS" "ARW"], ESS_2', title = "Effective Sample Size per Second (P = 50)", legend = false, yscale=:log10, yticks = [1, 10, 100, 1000], ylims = [1, 1000], markerstrokewidth=0, color=colors)
 ylabel!("Effective Sample Size per Second")
+  
+plot(box1, box2, box3,  scatter1, scatter2, scatter3, layout = @layout([A B C; D E F]), margin= 10Plots.mm)
 
+plot!(size = (1600,1000))
 
-plot(box1, scatter1, box2, scatter2, box3, scatter3, layout = (3,2),margin= 10Plots.mm)
-plot!(size = (2000,1500))
+savefig(string(dir ,"//Results.pdf"))
