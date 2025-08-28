@@ -241,10 +241,10 @@ xlabel!("Norm of μ")
 relative_KL = zeros(100,4)
 relative_KL[:,1:2] .= KL_dist_banana[:,1:2]
 relative_KL[:,3:4] .= KL_dist_banana[:,4:5]
-relative_KL ./= KL_dist_banana[:,3]
+relative_KL .-= KL_dist_banana[:,3]
 
 p7 = boxplot(["ESS" "GESS" "HMC" "ARW"], relative_KL, legend = false, color=[:red :blue :orange :purple], markerstrokewidth=0)
-p7 = hline!([1], color =:green)
+p7 = hline!([0], color =:green)
 ylabel!("Relative KL Divergence")
 
 plot(p_density, p1, p2, p6, p3, p4, p5, p7, layout = @layout([A B C D; E F G H]), margin= 5Plots.mm)
@@ -456,11 +456,17 @@ for i in 1:100
   end
 end
 
-p6 = boxplot(["ESS" "GESS" "AGESS"], ESS_per_second_twin_bananas, legend = false, color = [:red :blue :green], markerstrokewidth=0, ylim = (0, 400))
+p6 = boxplot(["ESS" "GESS" "AGESS"], ESS_per_second_twin_bananas, markerstrokewidth=0, color=[:red :blue :green], legend = false, ylim = (0,300))
 ylabel!("Effective Sample Size per Second")
-legend = legend = plot([0 0 0 0 0] , showaxis = false, grid = false, label = ["ESS" "GESS" "AGESS" "HMC" "ARW"], color = colors)
+relative_KL = zeros(100,2)
+relative_KL[:,1:2] .= KL_dist_twin_banana[:,1:2]
+relative_KL .-= KL_dist_twin_banana[:,3]
+
+p7 = boxplot(["ESS" "GESS"], relative_KL, legend = false, color=[:red :blue :orange :purple], markerstrokewidth=0)
+p7 = hline!([0], color =:green)
+ylabel!("Relative KL Divergence")
 
 
-plot(p_density, p1, p2, p3, p4, p5,  layout = @layout([A B C; D E F] ))
-plot!(size = (1500, 1000))
-savefig("/Users/ndm34/Projects/AGESS_Simulation/Banana/Twin_Bananas.pdf")
+plot(p_density, p1, p2, p6, p3, p4, p5,  p7, layout = @layout([A B C D; E F G H] ), margin= 5Plots.mm)
+plot!(size = (1800, 1000))
+savefig(string(dir ,"//Twin_Bananas//Results.pdf"))
