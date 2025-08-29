@@ -1,11 +1,12 @@
 using StanBase
-set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-#set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
+#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
+set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity
 
-dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
+#dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
+dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Horseshoe"
 model = "
 data {
   int N;
@@ -26,9 +27,8 @@ model {
     lambda[i] ~ cauchy(0,1);
   }
   tau ~ cauchy(0,1);
-  sigma ~ inv_gamma(3,1);
   for (i in 1:P){
-    beta[i] ~ normal(0, sigma * tau^2 * lambda[i]^2);
+    beta[i] ~ normal(0, sigma * tau * lambda[i]);
   }
 
   y ~ normal_id_glm(X, 0, beta, sigma);
@@ -38,7 +38,7 @@ model {
 function prior_β(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ_sq::Y)::Float64 where {Y<:AbstractFloat}
   lpdf::Float64 = 0.0
   for i in eachindex(β)
-      lpdf += logpdf(Normal(0, exp(σ_sq) * exp(τ)^2 * exp(λ[i])^2), β[i])
+      lpdf += logpdf(Normal(0, sqrt(exp(σ_sq)) * exp(τ) * exp(λ[i])), β[i])
   end
   return lpdf
 end
@@ -97,7 +97,7 @@ sm_HS = SampleModel("HorseShoe", model);
 
 ### STAN
 t1 = time()
-rc = stan_sample(sm_HS; num_chains=1, num_warmups=100000, num_samples=100000, data);
+rc = stan_sample(sm_HS; num_chains=1, num_warmups=10000, num_samples=100000, data);
 stan_time = time() - t1
 df = read_samples(sm_HS, :array);
 df = df[:,:,1]
@@ -159,11 +159,21 @@ HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:end]', legend = false)
 half_t_β = plot(beta_samps_half_t[100000:end, findall(β .!= 0)], legend = false)
 half_t_β_0 = plot(beta_samps_half_t[100000:end, findall(β .== 0)], legend = false)
 
+MCMC_iters = 200000
+x_AGESS_BR = zeros(MCMC_iters, P+2)
+Σ = diagm(ones(P+2))
+μ_AGESS = zeros(P+2)
+AGESS_time_BR = AGESS(x_AGESS_BR, b -> log_posterior_BR(b[1:P], b[P+1], b[P+2], data["X"], data["y"]), 
+      μ_AGESS, Σ, true)
 
-plot(GESS_β, AGESS_β, Stan_β, HS_β, half_t_β, GESS_β_0, AGESS_β_0, Stan_β_0, HS_β_0, half_t_β_0, layout = @layout([A B C D E ; F G H I J]), margin= 5Plots.mm)
+AGESS_β_BR = plot(x_AGESS_BR[100000:end, findall(β .!= 0)], legend = false)
+AGESS_β_0_BR = plot(x_AGESS_BR[100000:end, findall(β .== 0)], legend = false)
+
+
+plot(GESS_β, AGESS_β, Stan_β, HS_β, half_t_β, AGESS_β_BR, GESS_β_0, AGESS_β_0, Stan_β_0, HS_β_0, half_t_β_0, AGESS_β_0_BR, layout = @layout([A B C D E F; G H I J K L]), margin= 5Plots.mm)
 plot!(size = (2500, 1000))
 
-savefig(string(dir, "/low_dim_low_corr2.pdf"))
+savefig(string(dir, "\\low_dim_low_corr2.jpg"))
 
 x_GESS1 = x_GESS[100001:end,1:50]
 x_AGESS1 = x_AGESS[100001:end,1:50]
@@ -270,7 +280,7 @@ half_t_β_0_HC = plot(beta_samps_half_t[100000:end, findall(β .== 0)], legend =
 plot(GESS_β_HC, AGESS_β_HC, Stan_β_HC, HS_β_HC, half_t_β_HC, GESS_β_0_HC, AGESS_β_0_HC, Stan_β_0_HC, HS_β_0_HC, half_t_β_0_HC, layout = @layout([A B C D E ; F G H I J]), margin= 5Plots.mm)
 plot!(size = (2500, 1000))
 
-savefig(string(dir, "/low_dim_high_corr.pdf"))
+savefig(string(dir, "/low_dim_high_corr.jpg"))
 
 false_positive = 0
 for i in 1:length(findall(β .== 0))
@@ -320,7 +330,7 @@ ess_half_t <- multiESS(mats, covmat = sigma) / 5
 N = 100
 P = 500
 
-X,Y,β = gen_data(N, P, ρ = 0.5, sparsity = 0.98)
+X,Y,β = gen_data(N, P, ρ = 0.9, sparsity = 0.98)
 
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
 
@@ -328,13 +338,16 @@ data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
 sm_HS = SampleModel("HorseShoe", model);
 
 t1 = time()
-rc = stan_sample(sm_HS; num_chains=1, num_warmups=10000, num_samples=40000, data);
+rc = stan_sample(sm_HS; num_chains=1, num_warmups=10000, num_samples=100000, data);
 stan_time = time() - t1
 df = read_samples(sm_HS, :array);
 df = df[:,:,1]
 
+Stan_β_HC = plot(df[1:5:end, findall(β .!= 0)], legend = false, dpi = 300)
+Stan_β_0_HC = plot(df[1:5:end, findall(β .== 0)], legend = false, dpi = 300)
 
-
+savefig(Stan_β_HC, string(dir, "\\stan_beta.pdf"))
+savefig(Stan_β_0_HC, string(dir, "\\stan_beta_0.pdf"))
 
 MCMC_iters = 200000
 x_AGESS = zeros(MCMC_iters, 2*P+2)
@@ -343,44 +356,129 @@ x_AGESS = zeros(MCMC_iters, 2*P+2)
 AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
       μ_AGESS, Σ, true)
 
+AGESS_β_HC = plot(x_AGESS[100000:5:end, findall(β .!= 0)], legend = false, dpi = 300)
+AGESS_β_0_HC = plot(x_AGESS[100000:5:end, findall(β .== 0)], legend = false, dpi = 300)
 
-x_GESS = zeros(MCMC_iters, 2*P+2)
-x_GESS[:,(2*P+1):end] .= 0.5
-μ_GESS = zeros(2*P+2)
-GESS_time = GESS(x_GESS,  b -> (logpdf(MvNormal(data["X"] * b[1:P], Σ_I .* exp(b[2*P+2])), data["y"]) + prior_β(b[1:P], b[2*P+1], b[2*P+2], b[(P+1):(2*P)]) + prior_λ(b[(P+1):(2*P)]) + logpdf(Cauchy(0, 1), exp(b[2*P+1])) + logpdf(InverseGamma(3, 1), exp(b[2*P+2])) + b[2*P+1] + b[2*P+2]),
-                 μ_GESS, Σ)
+savefig(AGESS_β_HC, string(dir, "\\AGESS_beta.pdf"))
+savefig(AGESS_β_0_HC, string(dir, "\\AGESS_beta_0.pdf"))
 
 
 
 x_AGESS1 = x_AGESS[60000:end,:]
 @rput X
 @rput Y
-@rput x_AGESS1
-@rput df
 R"""
 library(CoupledHalfT)
 library(horseshoe)
 
 X_transpose <- t(X)
 burnin <- 0
-chain_length <- 100000
+chain_length <- 200000
 chain <- NA
 time1 = Sys.time()
 hs_chain <- horseshoe(Y, X, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
 #try(chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y, t_dist_df=2))
 time_end = Sys.time() - time1
+beta_samps_HS = hs_chain$BetaSamples
+HS_time = time_end
 
-
-library(mcmcse)
-mats = rbind(x_AGESS1,df)
-sigma = mcse.multi(x_AGESS1)$cov
-ess_AGESS <- multiESS(mats, covmat = sigma) / 2
-sigma = mcse.multi(df)$cov
-ess_Stan <- multiESS(mats, covmat = sigma) / 2
-
-library(stableGR)
-ess_AGESS1 <- n.eff(x_AGESS1)$n.eff
-ess_Stan1 <- n.eff(df)
-
+time1 = Sys.time()
+half_t_chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, Y, t_dist_df=3)
+time_end = Sys.time() - time1
+half_t_time = time_end
+beta_samps_half_t = half_t_chain$beta_samples
 """
+
+@rget beta_samps_HS
+@rget HS_time
+@rget half_t_time
+@rget beta_samps_half_t
+HS_β_HC = plot(beta_samps_HS[findall(β .!= 0), 100000:5:end]', legend = false)
+HS_β_0_HC = plot(beta_samps_HS[findall(β .== 0), 100000:5:end]', legend = false)
+
+half_t_β_HC = plot(beta_samps_half_t[100000:5:end, findall(β .!= 0)], legend = false)
+half_t_β_0_HC = plot(beta_samps_half_t[100000:5:end, findall(β .== 0)], legend = false)
+
+
+function get_coverage(β::AbstractVector{Y}, x_AGESS::AbstractMatrix{Y}, x_STAN::AbstractMatrix{Y}, x_HS::AbstractMatrix{Y}, x_CHT::AbstractMatrix{Y}) where {Y<:AbstractFloat}
+    inc_β_AGESS = 0
+    inc_β_0_AGESS = 0
+    inc_β_STAN = 0
+    inc_β_0_STAN = 0
+    inc_β_HS = 0
+    inc_β_0_HS = 0
+    inc_β_CHT = 0
+    inc_β_0_CHT = 0
+    for i in eachindex(β)
+      if β[i] != 0
+        CI = quantile(x_AGESS[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_AGESS += 1
+          end
+        end
+        
+        CI = quantile(x_STAN[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_STAN += 1
+          end
+        end
+
+        CI = quantile(x_HS[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_HS += 1
+          end
+        end
+
+        CI = quantile(x_CHT[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_CHT += 1
+          end
+        end
+      else
+        CI = quantile(x_AGESS[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_0_AGESS += 1
+          end
+        end
+        
+        CI = quantile(x_STAN[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_0_STAN += 1
+          end
+        end
+
+        CI = quantile(x_HS[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_0_HS += 1
+          end
+        end
+
+        CI = quantile(x_CHT[100000:end,i], [0.025 0.975])
+        if CI[1] <= β[i]
+          if CI[2] >= β[i]
+            inc_β_0_CHT += 1
+          end
+        end
+      end
+    end
+    inc_β_AGESS = inc_β_AGESS / sum(β .!= 0)
+    inc_β_STAN = inc_β_STAN / sum(β .!= 0)
+    inc_β_HS = inc_β_HS / sum(β .!= 0)
+    inc_β_CHT = inc_β_CHT / sum(β .!= 0)
+    inc_β_0_AGESS = inc_β_0_AGESS / sum(β .== 0)
+    inc_β_0_STAN = inc_β_0_STAN / sum(β .== 0)
+    inc_β_0_HS = inc_β_0_HS / sum(β .== 0)
+    inc_β_0_CHT = inc_β_0_CHT / sum(β .== 0)
+
+    return inc_β_AGESS, inc_β_0_AGESS, inc_β_STAN, inc_β_0_STAN, inc_β_HS, inc_β_0_HS, inc_β_CHT, inc_β_0_CHT
+end
+
+coverage = get_coverage(β, x_AGESS[100000:end,:], df, beta_samps_HS[:, 100000:end]', beta_samps_half_t[100000:end,:])
 
