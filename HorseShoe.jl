@@ -66,7 +66,7 @@ function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) wh
     β = zeros(P)
     for i in 1:P
         if rand(Bernoulli(1 - sparsity)) == 1
-            β[i] = rand(TDist(2.0)) * 2
+            β[i] = rand(TDist(2.0)) * 0.5
         end
     end
 
@@ -268,8 +268,9 @@ beta_samps_half_t = half_t_chain$beta_samples
 @rget HS_time
 @rget half_t_time
 @rget beta_samps_half_t
-HS_β_HC = plot(beta_samps_HS[findall(β .!= 0), 100000:end]', legend = false)
-HS_β_0_HC = plot(beta_samps_HS[findall(β .== 0), 100000:end]', legend = false)
+HS_β_HC = plot(beta_samps_HS[findall(β .!= 0), 100000:10:end]', legend = false)
+hline!(β[findall(β .!= 0)], color = "black", line = (3, :dash))
+HS_β_0_HC = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false)
 
 half_t_β_HC = plot(beta_samps_half_t[100000:end, findall(β .!= 0)], legend = false)
 half_t_β_0_HC = plot(beta_samps_half_t[100000:end, findall(β .== 0)], legend = false)
@@ -548,3 +549,48 @@ beta_samples <- rv.pois$beta
 @rget beta_samples
 br_β_HC = plot(beta_samples[findall(β .!= 0), 1:10:end,], legend = false)
 br_β_0_HC = plot(beta_samples[findall(β .== 0), 1:10:end,], legend = false)
+
+
+#######################
+###### Real Data ######
+#######################
+### Biscuit dough dataset 
+
+R"""
+library(fds)
+data(labp)
+y_obs = labp[1,]
+data(nirp)
+X = t(nirp$y)
+
+# Run Horseshoe
+burnin <- 0
+chain_length <- 200000
+chain <- NA
+time1 = Sys.time()
+hs_chain <- horseshoe(y_obs, X, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+#try(chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y, t_dist_df=2))
+time_end = Sys.time() - time1
+beta_samps_HS1 = hs_chain$BetaSamples
+HS_time = time_end
+
+"""
+@rget beta_samps_HS1
+@rget HS_time
+@rget X
+@rget y_obs
+
+index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
+
+g1 = plot(mean(beta_samps_HS, dims = 2))
+plot!(mean(beta_samps_HS1, dims = 2))
+
+
+P = size(X)[2]
+MCMC_iters = 1000000
+x_AGESS = zeros(MCMC_iters, 2*P+2)
+Σ = diagm(ones(2*P+2))
+μ_AGESS = zeros(2*P+2)
+ph = zeros(N)
+AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X, y_obs), 
+      μ_AGESS, Σ, true, burnin = 0.1)

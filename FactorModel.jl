@@ -11,9 +11,11 @@ function posterior(Λ::AbstractMatrix{Y}, η::AbstractMatrix{Y}, Y_obs::Abstract
                    μ_0::AbstractVector{Y}, ph::AbstractVector{Y})::Float64 where {Y<:AbstractFloat}
     lpdf::Float64 = 0.0
     ## Likelihood
+    ph .= 0
+    Mvnorm_d = MvNormal(ph, Σ)
     for i in 1:size(Y_obs)[1]
         @views mul!(ph, Λ', η[i,:])
-        @views lpdf += logpdf(MvNormal(ph, Σ), Y_obs[i,:])
+        @views lpdf += logpdf(Mvnorm_d, Y_obs[i,:])
     end
 
     ##Priors 
@@ -25,22 +27,25 @@ function posterior(Λ::AbstractMatrix{Y}, η::AbstractMatrix{Y}, Y_obs::Abstract
         end
     end
 
+    ig_d = InverseGamma(1,1)
     for i in 1:size(Σ)[1]
-        @views lpdf += logpdf(InverseGamma(1,1), Σ[i,i]) + log(Σ[i,i])
+        @views lpdf += logpdf(ig_d, Σ[i,i]) + log(Σ[i,i])
     end
 
     τ_ph .= exp.(δ)
     for i in 2:length(δ)
-        τ_ph[i] .*= τ_ph[i-1]
+        τ_ph[i] *= τ_ph[i-1]
     end
 
+    gamma_d = Gamma(0.5 * ν, 0.5 * ν)
     for i in 1:size(Λ)[1], j in 1:size(Λ)[2]
         @views lpdf += logpdf(Normal(0.0, sqrt(1 / (exp(ϕ[i,j]) * τ_ph[i]))), Λ[i,j])
-        @views lpdf += logpdf(Gamma(0.5 * ν, 0.5 * ν), exp(ϕ[i,j])) + ϕ[i,j]
+        @views lpdf += logpdf(gamma_d, exp(ϕ[i,j])) + ϕ[i,j]
     end
 
+    normal_η_d = MvNormal(μ_0, 1.0)
     for i in 1:size(η)[1]
-        @views lpdf += logpdf(MvNormal(μ_0, 1.0), η[i,:])
+        @views lpdf += logpdf(normal_η_d, η[i,:])
     end
 
     return lpdf
@@ -89,7 +94,7 @@ ph = zeros(P)
 Λ_ph = zeros(K, P)
 η_ph = zeros(N, K)
 ϕ_ph = zeros(K, P)
-@report_opt lpdf = transform_posterior(b[1:K*P], b[(K*P + 1):(N*K + K*P)], y_obs, b[(N*K + K*P + 1):(N*K + K*P + P)],
+@benchmark lpdf = transform_posterior(b[1:K*P], b[(K*P + 1):(N*K + K*P)], y_obs, b[(N*K + K*P + 1):(N*K + K*P + P)],
                            b[(N*K + K*P + P + 1):(N*K + 2*K*P + P)], b[(N*K + 2*K*P + P + 1):(N*K + 2*K*P + P + K)],
                            τ_ph, a_1, a_2, ν, μ_0, N, P, K, Σ_ph, ph)
 
