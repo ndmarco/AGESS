@@ -5,6 +5,8 @@ set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 
+dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\DeepGP"
+
 function gen_data(N::T, min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:Integer}
     X = collect(LinRange(min_eval, max_eval, N))
     Y_N = sin.(X) .+ 2 * exp.(-30 * X.^2)
@@ -16,12 +18,6 @@ function gen_data(X::AbstractVector{Y}) where {Y<:AbstractFloat}
     return Y_N
 end
 
-function gen_data_Higdon(N::T,min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:Integer}
-    X = collect(LinRange(min_eval, max_eval, N))
-    Y_N = sin.((π .* X) ./ 5) + 0.2 * cos.(((4 * π) .* X) ./ 5)
-    Y_N[X .> 10] .= (X[X .> 10.0]) ./ 10 .- 0.8
-    return X, Y_N
-end
 
 function construct_Kernel_Mat!(Σ::AbstractMatrix{Y}, X::AbstractVector{Y}, θ::Y) where {Y<:AbstractFloat}
     for j in 1:size(Σ)[1],k in 1:size(Σ)[2]
@@ -40,7 +36,7 @@ function construct_Kernel_Mat_y!(Σ::AbstractMatrix{Y}, X::AbstractVector{Y}, W:
 end
 
 function likelihood_Y(W::AbstractVector{Y}, X::AbstractVector{Y}, Y_N::AbstractVector{Y}, g::Y, θ_y_x::Y, θ_y_w::Y, ph::AbstractVector{Y}, 
-                      Σ::AbstractMatrix{Y}, ν_y::Y) where {Y<:AbstractFloat}
+                      Σ::AbstractMatrix{Y}, ν_y::Y)::Float64 where {Y<:AbstractFloat}
     construct_Kernel_Mat_y!(Σ, X, W, θ_y_x, θ_y_w)
     Σ[diagind(Σ)] .+=  g
     cholesky!(Σ)
@@ -50,7 +46,7 @@ function likelihood_Y(W::AbstractVector{Y}, X::AbstractVector{Y}, Y_N::AbstractV
     return lpdf
 end
 
-function likelihood_W(W::AbstractVector{Y}, X_N::AbstractVector{Y}, θ_w::Y, g::Y, ph::AbstractVector{Y}, Σ::AbstractMatrix{Y}) where {Y<:AbstractFloat}
+function likelihood_W(W::AbstractVector{Y}, X_N::AbstractVector{Y}, θ_w::Y, g::Y, ph::AbstractVector{Y}, Σ::AbstractMatrix{Y})::Float64 where {Y<:AbstractFloat}
     construct_Kernel_Mat!(Σ, X_N, θ_w)
     Σ[diagind(Σ)] .+= g
     cholesky!(Σ)
@@ -117,7 +113,7 @@ function predictive_draws(time_points::AbstractVector{Y}, W::AbstractMatrix{Y}, 
     burnin_num = floor(Int64, (burnin * n_MCMC))
     P_out = length(time_points)
     P = length(X_N)
-    steps = collect(range(burnin_num +1, n_MCMC, step = thinning))
+    steps = collect(range(burnin_num + 1, n_MCMC, step = thinning))
     Y_out = zeros(length(steps), P_out)
     W_out = zeros(P_out)
     k_out_X_const = zeros(P_out, P)
@@ -346,10 +342,10 @@ data {
 }
 
 parameters {
-  real<lower = 0> theta_w;
-  real<lower = 0> theta_y_w;
-  real<lower = 0> theta_y_x;
   vector[N] W;
+  real<lower = 0> theta_y_x;
+  real<lower = 0> theta_y_w;
+  real<lower = 0> theta_w;
 }
 
 model {
@@ -357,7 +353,7 @@ model {
   for (i in 1:(N - 1)) {
     K_y[i, i] = 1 + g;
     for (j in (i + 1):N) {
-      K_y[i, j] = exp(- (square(X[i] - X[j]) / theta_y_x)  - (square(W[i] - W[j]) / theta_y_w));
+      K_y[i, j] = exp(-((X[i] - X[j])^2 / theta_y_x) - ((W[i] - W[j])^2 / theta_y_w));
       K_y[j, i] = K_y[i, j];
     }
   }
@@ -367,7 +363,7 @@ model {
   for (i in 1:(N - 1)) {
     K_w[i, i] = 1 + g;
     for (j in (i + 1):N) {
-      K_w[i, j] = exp(- (square(X[i] - X[j]) / theta_w));
+      K_w[i, j] = exp(- ((X[i] - X[j])^2 / theta_w));
       K_w[j, i] = K_w[i, j];
     }
   }
@@ -383,7 +379,13 @@ model {
 }
 ";
 
-
+## Create Directories
+if !isdir(string(dir ,"//Large_Nugget"))
+    mkdir(string(dir ,"//Large_Nugget"))
+end
+if !isdir(string(dir ,"//Small_Nugget"))
+    mkdir(string(dir ,"//Small_Nugget"))
+end
 
 
 ## Generate data
@@ -397,7 +399,7 @@ times = zeros(3, 10)
 
 n_reps = 10
 MCMC_iters = 250000
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\DeepGP"
+
 
 Random.seed!(1234)
 
@@ -408,7 +410,7 @@ for i in 1:n_reps
 
     sm = SampleModel("deepGP", model);
 
-    data = Dict("N" => N_obs, "g" => g, "Y" => Y_N, "X" =>X_N);
+    data = Dict("N" => N_obs, "g" => g, "Y" => Y_N, "X" => X_N);
 
     t1 = time()
     rc = stan_sample(sm; num_cpp_chains=1, num_chains=1,num_warmups=floor(Int, 0.5 * MCMC_iters), num_samples=floor(Int, 0.5 * MCMC_iters), data);
@@ -436,53 +438,78 @@ for i in 1:n_reps
     sampler_ESS(Y_N, X_N, W, θ_w, θ_y_x, θ_y_w, g, k -> logpdf(Gamma(1,2), k))
     ESS_time = time() - t1 
 
-    df_ESS = hcat(θ_w, θ_y_w, θ_y_x, W)
+    df_ESS = hcat(W, θ_y_w, θ_y_x, θ_w)
     df_ESS = df_ESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
 
     #########################
     ## GESS implementation ##
     #########################
 
-    W_GESS = ones(MCMC_iters, N_obs) 
-    ## Initialize with W = X_N
-    W_GESS[1,:] .= X_N
-    W_GESS[2,:] .= X_N
+    W_GESS = ones(MCMC_iters, N_obs + 3) 
+    W_GESS[1,1:N_obs] .= X_N
+    W_GESS[2,1:N_obs] .= X_N
 
+    W_GESS[1:2,N_obs + 1] .= log(0.5)
+    W_GESS[1:2,N_obs + 2] .= log(0.5)
+    W_GESS[1:2,N_obs + 3] .= log(0.5)
 
-    θ_w_GESS = log.(ones(MCMC_iters) * 0.5)
-    θ_y_x_GESS = log.(ones(MCMC_iters) * 0.5)
-    θ_y_w_GESS = log.(ones(MCMC_iters) * 0.5)
+    μ_0 = zeros(N_obs + 3)
+    Σ_0 = diagm(ones(N_obs + 3))
+    ph1 = ones(N_obs)
+    Σ1 = diagm(ones(N_obs))
+    ph2 = ones(N_obs)
+    Σ2 = diagm(ones(N_obs))
+    ν_y = 6.0
 
     t1 = time()
-    sampler_GESS(Y_N, X_N, W_GESS, θ_w_GESS, θ_y_x_GESS, θ_y_w_GESS, g, k -> logpdf(Gamma(1,2), k),
-        zeros(N_obs + 3), diagm(ones(N_obs + 3)))
-    GESS_time = time() - t1 
-    df_GESS = hcat(θ_w_GESS, θ_y_w_GESS, θ_y_x_GESS, W_GESS)
-    df_GESS = df_GESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
+
+
+    GESS(W_GESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
+                        likelihood_W(b[1:N_obs], X_N, exp(b[N_obs+3]), g, ph2, Σ2) + logpdf(Gamma(1,2), exp(b[N_obs+1])) + 
+                        b[N_obs+1] + logpdf(Gamma(1,2), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1,2), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0)
+
+    df_GESS = W_GESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
+    df_GESS[:,(N_obs + 1):(N_obs + 3)] .= exp.(df_GESS[:,(N_obs + 1):(N_obs + 3)])
 
     ##########################
     ## AGESS implementation ##
     ##########################
 
-    W_AGESS = ones(MCMC_iters, N_obs) 
+    W_AGESS = ones(MCMC_iters, N_obs + 3) 
     ## Initialize with W = X_N
-    W_AGESS[1,:] .= X_N
-    W_AGESS[2,:] .= X_N
+    W_AGESS[1,1:N_obs] .= X_N
+    W_AGESS[2,1:N_obs] .= X_N
+
+    W_AGESS[1:2,N_obs + 1] .= log(0.5)
+    W_AGESS[1:2,N_obs + 2] .= log(0.5)
+    W_AGESS[1:2,N_obs + 3] .= log(0.5)
+
+    μ_0 = zeros(N_obs + 3)
+    Σ_0 = diagm(ones(N_obs + 3))
+    ph1 = ones(N_obs)
+    Σ1 = diagm(ones(N_obs))
+    ph2 = ones(N_obs)
+    Σ2 = diagm(ones(N_obs))
+    AGESS_time, Σ_adapt = AGESS(W_AGESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
+                                            likelihood_W(b[1:N_obs], X_N, exp(b[N_obs+3]), g, ph2, Σ2) + logpdf(Gamma(1,2), exp(b[N_obs+1])) + 
+                                            b[N_obs+1] + logpdf(Gamma(1,2), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1,2), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0, true)
+
+    df_AGESS = W_AGESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
+    df_AGESS[:,(N_obs + 1):(N_obs + 3)] .= exp.(df_AGESS[:,(N_obs + 1):(N_obs + 3)])
 
 
-    θ_w_AGESS = log.(ones(MCMC_iters) * 0.5)
-    θ_y_x_AGESS = log.(ones(MCMC_iters) * 0.5)
-    θ_y_w_AGESS = log.(ones(MCMC_iters) * 0.5)
-
-    t1 = time()
-    sampler_AGESS(Y_N, X_N, W_AGESS, θ_w_AGESS, θ_y_x_AGESS, θ_y_w_AGESS, g, k -> logpdf(Gamma(1,2), k), true, ν = 6.0, ϵ = 0.1)
-    AGESS_time = time() - t1 
-
-    df_AGESS = hcat(θ_w_AGESS, θ_y_w_AGESS, θ_y_x_AGESS, W_AGESS)
-    df_AGESS = df_AGESS[(floor(Int, 0.5 * MCMC_iters) + 1):MCMC_iters,:]
-
+    time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
+    time_points = setdiff(time_points, X_N)
+    Y_pred_AGESS = predictive_draws(time_points, df_AGESS[:,1:N_obs], df_AGESS[:,N_obs + 3], df_AGESS[:,N_obs + 1], df_AGESS[:,N_obs + 2], g, Y_N, X_N, 6.0)
+    Y_pred_GESS = predictive_draws(time_points, df_GESS[:,1:N_obs], df_GESS[:,N_obs + 3], df_GESS[:,N_obs + 1], df_GESS[:,N_obs + 2], g, Y_N, X_N, 6.0)
+    Y_pred_Stan = predictive_draws(time_points, df_Stan[:,1:N_obs], df_Stan[:,N_obs + 3], df_Stan[:,N_obs + 1], df_Stan[:,N_obs + 2], g, Y_N, X_N, 6.0)
+    Y_pred_ESS = predictive_draws(time_points, df_ESS[:,1:N_obs], df_ESS[:,N_obs + 3], df_ESS[:,N_obs + 1], df_ESS[:,N_obs + 2], g, Y_N, X_N, 6.0)
+    truth = gen_data(time_points)
+    p = plot_CI(Y_N, X_N, Y_pred_ESS, time_points, truth)
+    p1 = plot_CI(Y_N, X_N, Y_pred_GESS, time_points, truth)
+    p2 = plot_CI(Y_N, X_N, Y_pred_AGESS, time_points, truth)
+    p3 = plot_CI(Y_N, X_N, Y_pred_Stan, time_points, truth)
     @rput df_Stan
-    @rput df_ESS
     @rput df_GESS
     @rput df_AGESS
 
@@ -495,33 +522,31 @@ for i in 1:n_reps
 
     """
 
-    @rget ess_ESS
     @rget ess_GESS
     @rget ess_AGESS
     @rget ess_HMC
 
-    ESS_per_second[1,i]= ess_GESS / (0.5 * GESS_time)
-    ESS_per_second[2,i] = ess_AGESS / (0.5 * AGESS_time)
+    ESS_per_second[1,i]= ess_GESS / (GESS_time)
+    ESS_per_second[2,i] = ess_AGESS / (AGESS_time)
     ESS_per_second[3,i] = ess_HMC / (0.5 * stan_time)
 
-    times[1, i] = 0.5 * GESS_time
-    times[2, i] = 0.5 * AGESS_time
+    times[1, i] = GESS_time
+    times[2, i] = AGESS_time
     times[3, i] = 0.5 * stan_time
 
-    save(string(dir ,"\\Sim", i,".jld2"), Dict("df_Stan" => df_Stan, 
-                                               "df_ESS" => df_ESS,
-                                               "df_GESS" => df_GESS,
-                                               "df_AGESS" => df_AGESS,
-                                               "ess_Stan" => ess_HMC,
-                                               "ess_ESS" => ess_ESS,
-                                               "ess_GESS" => ess_GESS,
-                                               "ess_AGESS" => ess_AGESS,
-                                               "ESS_time" => ESS_time,
-                                               "GESS_time" => GESS_time,
-                                               "AGESS_time" => AGESS_time,
-                                               "stan_Time" => stan_time))
+    save(string(dir ,"\\Small_Nugget\\Sim", i,".jld2"), Dict("df_Stan" => df_Stan, 
+                                                             "df_ESS" => df_ESS,
+                                                             "df_GESS" => df_GESS,
+                                                             "df_AGESS" => df_AGESS,
+                                                             "ess_Stan" => ess_HMC,
+                                                             "ess_ESS" => ess_ESS,
+                                                             "ess_GESS" => ess_GESS,
+                                                             "ess_AGESS" => ess_AGESS,
+                                                             "ESS_time" => ESS_time,
+                                                             "GESS_time" => GESS_time,
+                                                             "AGESS_time" => AGESS_time,
+                                                             "stan_Time" => stan_time))
             
-
 end
 
 
@@ -672,7 +697,7 @@ t1 = time()
 
 GESS(W_GESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
 likelihood_W(b[1:N_obs], X_N, exp(b[N_obs+3]), g, ph2, Σ2) + logpdf(Gamma(1,2), exp(b[N_obs+1])) + 
-b[N_obs+1] + logpdf(Gamma(1,2), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1,2), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0,)
+b[N_obs+1] + logpdf(Gamma(1,2), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1,2), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0)
 time_GESS = time() - t1
 
 time_points = collect(collect(LinRange(-5.0, 5.0, 500)))
