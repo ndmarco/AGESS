@@ -33,15 +33,16 @@ model {
 function prior_β(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::Y)::Float64 where {Y<:AbstractFloat}
   lpdf::Float64 = 0.0
   for i in eachindex(β)
-      lpdf += logpdf(Normal(0, sqrt(exp(σ)) * exp(τ) * exp(λ[i])), β[i])
+      @views lpdf += logpdf(Normal(0, exp(σ) * exp(τ) * exp(λ[i])), β[i])
   end
   return lpdf
 end
 
 function prior_λ(λ::AbstractVector{Y})::Float64 where {Y<:AbstractFloat}
   lpdf::Float64 = 0.0
+  cauchy_d = Cauchy(0,1)
   for i in eachindex(λ)
-      lpdf += logpdf(Cauchy(0,1), exp(λ[i])) + λ[i]
+      @views lpdf += logpdf(cauchy_d, exp(λ[i])) + λ[i]
   end
   return lpdf
 end
@@ -53,7 +54,7 @@ function log_posterior(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::
     @views lpdf += logpdf(Normal(dot(X[i,:], β), exp(σ)), y[i])
   end
   ## Prior 
-  lpdf += prior_β(β, τ, λ, σ) + prior_λ(λ) + logpdf(Cauchy(0,1), exp(τ)) + τ
+  lpdf += prior_β(β, τ, λ, σ) + prior_λ(λ) + logpdf(Cauchy(0,1), exp(τ)) + τ - σ
 
   return lpdf
 end
@@ -66,7 +67,11 @@ function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) wh
     β = zeros(P)
     for i in 1:P
         if rand(Bernoulli(1 - sparsity)) == 1
-            β[i] = rand(TDist(2.0)) * 0.5
+          if rand() < 0.2
+            β[i] = 5.0
+          else
+            β[i] = 1.0
+          end
         end
     end
 
@@ -86,13 +91,12 @@ end
 N = 100
 P = 500
 
-X,Y, β = gen_data(N, P, ρ = 0.9, sparsity = 0.95)
-
-
+X,Y, β = gen_data(N, P, ρ = 0.6, sparsity = 0.98)
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
-sm_HS = SampleModel("HorseShoe", model);
+
 
 ### STAN
+sm_HS = SampleModel("HorseShoe", model);
 t1 = time()
 rc = stan_sample(sm_HS; num_chains=1, num_warmups=10000, num_samples=100000, data);
 stan_time = time() - t1
@@ -103,16 +107,16 @@ Stan_β = plot(df[1:10:end, findall(β .!= 0)], legend = false)
 Stan_β_0 = plot(df[1:10:end, findall(β .== 0)], legend = false)
 
 ### AGESS
-MCMC_iters = 1000000
+MCMC_iters = 200000
 x_AGESS = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)
 ph = zeros(N)
-AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
-      μ_AGESS, Σ, true, burnin = 0.1)
+@time AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
+      μ_AGESS, Σ, true, burnin = 0.5)
 
-AGESS_β = plot(x_AGESS[50000:10:end, findall(β .!= 0)], legend = false)
-AGESS_β_0 = plot(x_AGESS[50000:10:end, findall(β .== 0)], legend = false)
+AGESS_β = plot(x_AGESS[50000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+AGESS_β_0 = plot(x_AGESS[50000:10:end, findall(β .== 0)], legend = false, dpi = 300)
 
 ### GESS
 x_GESS = zeros(MCMC_iters, 2*P+2)
@@ -558,6 +562,7 @@ br_β_0_HC = plot(beta_samples[findall(β .== 0), 1:10:end,], legend = false)
 
 R"""
 library(fds)
+library(horseshoe)
 data(labp)
 y_obs = labp[1,]
 data(nirp)
@@ -569,7 +574,6 @@ chain_length <- 200000
 chain <- NA
 time1 = Sys.time()
 hs_chain <- horseshoe(y_obs, X, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
-#try(chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y, t_dist_df=2))
 time_end = Sys.time() - time1
 beta_samps_HS1 = hs_chain$BetaSamples
 HS_time = time_end
@@ -582,15 +586,17 @@ HS_time = time_end
 
 index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
 
-g1 = plot(mean(beta_samps_HS, dims = 2))
-plot!(mean(beta_samps_HS1, dims = 2))
+g1 = plot(median(beta_samps_HS1, dims = 2))
+plot!(median(x_AGESS[100000:end, 1:P], dims = 1)')
 
+
+sortperm(abs.(median(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
 
 P = size(X)[2]
 MCMC_iters = 1000000
-x_AGESS = zeros(MCMC_iters, 2*P+2)
+x_AGESS1 = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)
 ph = zeros(N)
-AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X, y_obs), 
-      μ_AGESS, Σ, true, burnin = 0.1)
+AGESS_time = AGESS(x_AGESS1, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X, y_obs), 
+      μ_AGESS, Σ, true, burnin = 0.5, single_step_prop = 0.1)

@@ -10,12 +10,12 @@ function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likeliho
     @views y = log_likelihood(x[i,:]) + log(rand(1)[1])
 
     ## Propose Initial Angle
-    θ = rand(1)[1] * 2 * π
+    θ = rand() * 2 * π
     θ_min = θ - 2 * π
     θ_max = θ
 
     ## Propose initial first move
-    x[i,:] .= ((x[i-1,:] - μ) .* cos(θ) .+  z .* sin(θ)) .+ μ
+    @views x[i,:] .= ((x[i-1,:] - μ) .* cos(θ) .+  z .* sin(θ)) .+ μ
     @views log_lik_prop = log_likelihood(x[i,:])
 
     ## Check to make sure that posterior pdfs are computable
@@ -34,8 +34,8 @@ function ESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_likeliho
         end
 
         ## Propose new angle
-        θ = θ_min + rand(1)[1] * (θ_max - θ_min)
-        x[i,:] .= ((x[i-1,:] - μ) .* cos(θ) .+  z .* sin(θ)) .+ μ
+        θ = θ_min + rand() * (θ_max - θ_min)
+        @views x[i,:] .= ((x[i-1,:] - μ) .* cos(θ) .+  z .* sin(θ)) .+ μ
         @views log_lik_prop = log_likelihood(x[i,:])
 
         ## Check to make sure that posterior pdfs are computable
@@ -69,7 +69,7 @@ function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, μ::AbstractVector{
 
         ## Populate next value in Markov Chain
         if i < n_MCMC
-            x[i+1,:] .= x[i,:]
+            @views x[i+1,:] .= x[i,:]
         end
 
         ## Update User
@@ -88,7 +88,8 @@ function GESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_posteri
     P = size(x)[2]
 
     α = 0.5 * (ν + P)
-    ph .= Σ_chol \ (x[i,:] - μ)
+    ph .= (x .- μ)
+    ph .= ((Σ_chol) \ ph)
     β = 0.5 * (ν + dot(ph,ph))
     s = rand(InverseGamma(α, β))
 
@@ -117,13 +118,13 @@ function GESS(x::AbstractMatrix{Y}, log_posterior::Function, μ::AbstractVector{
 
         ## Populate next value in Markov Chain
         if i < n_MCMC
-            x[i+1,:] .= x[i,:]
+            @views x[i+1,:] .= x[i,:]
         end
 
         ## Update User
         if (i % 25) == 0
             println("MCMC iter: ", i)
-            log_pos = @sprintf("%.2f", log_posterior(x[i,:]))
+            @views log_pos = @sprintf("%.2f", log_posterior(x[i,:]))
             println("Log Posterior: ", log_pos)
         end
     end
@@ -135,14 +136,16 @@ end
 
 function dMvT(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, 
               ph::AbstractVector{Y}, ν::Y, P::T) where {Y<:AbstractFloat, T<:Integer}
-    ph .= ((Σ_chol) \ (x .- μ))
+    ph .= (x .- μ)
+    ph .= ((Σ_chol) \ ph)
     pdf::Float64 = -(ν + P) * 0.5 * log1p((dot(ph, ph) / ν))
     return pdf
 end
 
 function dMvN(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, 
               ph::AbstractVector{Y}) where {Y<:AbstractFloat}
-    ph .= ((Σ_chol) \ (x .- μ))
+    ph .= (x .- μ)
+    ph .= ((Σ_chol) \ ph)
     pdf::Float64 = dot(ph, ph)
     return pdf
 end
@@ -150,11 +153,12 @@ end
 function cond_rMvT!(z::AbstractVector{Y}, x::AbstractVector{Y}, μ::AbstractVector{Y}, 
                     Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, ν::Y, ph::AbstractVector{Y}, P::T) where {Y<:AbstractFloat, T<:Integer}
     z .= Σ_chol * randn(P) 
-    ph .= ((Σ_chol) \ (x .- μ))
+    ph .= (x .- μ)
+    ph .= ((Σ_chol) \ ph)
     d = dot(ph, ph)
-    ν̃ = ν + P
-    z .*= sqrt((ν + d) / ν̃)
-    z .*=  1 / sqrt(rand(Gamma(ν̃/2, 2/ ν̃)))
+    ṽ = ν + P
+    z .*= sqrt((ν + d) / ṽ)
+    z .*=  1 / sqrt(rand(Gamma(ṽ/2, 2/ṽ)))
     z .+= μ
 
     return nothing
@@ -173,9 +177,9 @@ end
 function cond_rMvT_1d!(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
     z::Float64 = σ * randn() 
     d = (x - μ)^2 / (σ^2)
-    ν̃ = ν + 1
-    z *= sqrt((ν + d) / ν̃)
-    z *= 1 / sqrt(rand(Gamma(ν̃/2, 2/ ν̃)))
+    ṽ = ν + 1
+    z *= sqrt((ν + d) / ṽ)
+    z *= 1 / sqrt(rand(Gamma(ṽ/2, 2/ ṽ)))
     z += μ
 
     return z
@@ -190,7 +194,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
     L_star::Float64 = 0.0
     ## Propose new z from N(μ, Σ)
     if t_dist == true
-        cond_rMvT!(z, x[i,:], μ_adapt, Σ_chol_adapt, ν, ph, P)
+        @views cond_rMvT!(z, x[i,:], μ_adapt, Σ_chol_adapt, ν, ph, P)
     else
         z .= Σ_chol_adapt * randn(P) .+ μ_adapt
     end
@@ -203,12 +207,12 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
     end
 
     ## Propose Initial Angle
-    θ = rand(1)[1] * 2 * π
+    θ = rand() * 2 * π
     θ_min = θ - 2 * π
     θ_max = θ
 
     ## Propose initial first move
-    x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
+    @views x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
     @views L_star = log_posterior(x[i,:])::Float64 
     if t_dist == true
         @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)::Float64
@@ -232,8 +236,8 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
         end
 
         ## Propose new angle
-        θ = θ_min + rand(1)[1] * (θ_max - θ_min)
-        x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
+        θ = θ_min + rand() * (θ_max - θ_min)
+        @views x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
         @views L_star = log_posterior(x[i,:])::Float64 
         if t_dist == true
             @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)::Float64
@@ -255,7 +259,7 @@ end
 
 function AGESS(x::AbstractMatrix{Y}, log_posterior::Function, 
                μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
-               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1) where {Y<:AbstractFloat}
+               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1, single_step_prop::Y = 0.05) where {Y<:AbstractFloat}
     P = size(x)[2]
     n_MCMC = size(x)[1]
     z = zeros(P)
@@ -277,7 +281,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         end
 
         if P >= 10
-            if i < burnin_num * 0.05
+            if i < burnin_num * single_step_prop
                 AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
             else
                 if rand() > ϵ
@@ -301,7 +305,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         
         ## Adapt mean and covariance
-        w_i = min(1.0/(10 * P), i^(-1))
+        w_i = i^(-1)
         @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
         @views lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))
@@ -313,23 +317,23 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
 
         # Update User
         if P >= 10
-            if i < burnin_num * 0.05
+            if i < burnin_num * single_step_prop
                 if (i % 25) == 0
                     println("MCMC iter: ", i)
-                    log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
+                    @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
                     println("Log Posterior: ", log_lik)
                 end
             else
                 if (i % 1000) == 0
                     println("MCMC iter: ", i)
-                    log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
+                    @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
                     println("Log Posterior: ", log_lik)
                 end
             end
         else
             if (i % 1000) == 0
                 println("MCMC iter: ", i)
-                log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
+                @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
                 println("Log Posterior: ", log_lik)
             end
         end
@@ -363,7 +367,7 @@ function AGESS_SingleStep_1d(x::AbstractMatrix{Y}, log_posterior::Function,
         end
 
         ## Propose Initial Angle
-        θ = rand(1)[1] * 2 * π
+        θ = rand() * 2 * π
         θ_min = θ - 2 * π
         θ_max = θ
 
@@ -392,7 +396,7 @@ function AGESS_SingleStep_1d(x::AbstractMatrix{Y}, log_posterior::Function,
             end
 
             ## Propose new angle
-            θ = θ_min + rand(1)[1] * (θ_max - θ_min)
+            θ = θ_min + rand() * (θ_max - θ_min)
             x[i,j] = ((x[i-1,j] - μ_adapt[j]) * cos(θ) +  (z - μ_adapt[j]) * sin(θ)) + μ_adapt[j]
             @views L_star = log_posterior(x[i,:])
             if t_dist == true
@@ -433,7 +437,7 @@ function AGESS_SingleStep_1d_single(x::AbstractMatrix{Y}, log_posterior::Functio
     end
 
     ## Propose Initial Angle
-    θ = rand(1)[1] * 2 * π
+    θ = rand() * 2 * π
     θ_min = θ - 2 * π
     θ_max = θ
 
@@ -462,7 +466,7 @@ function AGESS_SingleStep_1d_single(x::AbstractMatrix{Y}, log_posterior::Functio
         end
 
         ## Propose new angle
-        θ = θ_min + rand(1)[1] * (θ_max - θ_min)
+        θ = θ_min + rand() * (θ_max - θ_min)
         x[i,j] = ((x[i-1,j] - μ_adapt[j]) * cos(θ) +  (z - μ_adapt[j]) * sin(θ)) + μ_adapt[j]
         @views L_star = log_posterior(x[i,:])
         if t_dist == true
@@ -497,7 +501,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
     for i in 2:block1
         # Perform random walk proposal
         for j in 1:P
-            z .= x[i,:]
+            @views z .= x[i,:]
             z[j] = x[i,j] + randn() * σ_rw[j]
             @views accept_prob = (log_likelihood(z) + log_prior(z)) - (log_likelihood(x[i,:]) + log_prior(x[i,:]))
             if isfinite(accept_prob)
@@ -512,7 +516,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         if (i % tuning_step) == 0
             println("MCMC iter: ", i)
             println("Acceptance: ", round(mean(acceptance) / tuning_step, digits=3))
-            log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
+            @views log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
             println("Log Likelihood: ", log_lik)
             for j in 1:P
                 σ_rw[j] = exp(log(σ_rw[j]) + ((acceptance[j] / tuning_step) - 0.44))
@@ -521,12 +525,12 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         end
 
         ## Update Markov Chain
-        x[i+1,:] .= x[i,:]
+        @views x[i+1,:] .= x[i,:]
     end
 
     half_warm_up_block = floor(Int64, block1/2)
-    Σ_chol_adapt = cholesky(cov(x[half_warm_up_block:block1,:]))
-    x_mean = mean(x[half_warm_up_block:block1,:], dims=1)[1,:]
+    @views Σ_chol_adapt = cholesky(cov(x[half_warm_up_block:block1,:]))
+    @views x_mean = mean(x[half_warm_up_block:block1,:], dims=1)[1,:]
     Σ_rw = Σ_chol_adapt.L .* (2.38 / sqrt(P))
     scaling_Σ_I = 1.0
 
@@ -538,18 +542,18 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         end
 
         # Block RW update
-        z = x[i,:] .+ Σ_rw * randn(P)
+        @views z = x[i,:] .+ Σ_rw * randn(P)
         @views accept_prob = (log_likelihood(z) + log_prior(z)) - (log_likelihood(x[i,:]) + log_prior(x[i,:]))
         if isfinite(accept_prob)
             if log(rand()) < accept_prob
-                x[i,:] .= z
+                @views x[i,:] .= z
                 acceptance[1] += 1
             end
         end
 
         # Adapt the covariance structure of proposal
         w_i = 1 / (i - half_warm_up_block)
-        x_mean = (1 - w_i) * x_mean + w_i * x[i,:]
+        @views x_mean = (1 - w_i) * x_mean + w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
         @views lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .-  x_mean))
         Σ_rw .= (Σ_chol_adapt.L) .* scaling_Σ_I .* (2.38 / sqrt(P))
@@ -562,13 +566,13 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
             ## Update User
             println("MCMC iter: ", i)
             println("Acceptance: ", round(acceptance[1] / tuning_step, digits=3))
-            log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
+            @views log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
             println("Log Likelihood: ", log_lik)
             acceptance[1] = 0
         end
 
         if i < n_MCMC
-            x[i+1,:] .= x[i,:]
+            @views x[i+1,:] .= x[i,:]
         end
     end
 
