@@ -593,7 +593,7 @@ plot!(median(x_AGESS[100000:end, 1:P], dims = 1)')
 sortperm(abs.(median(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
 
 P = size(X)[2]
-MCMC_iters = 1000000
+MCMC_iters = 100000
 x_AGESS1 = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)

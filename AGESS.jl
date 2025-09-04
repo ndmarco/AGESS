@@ -305,7 +305,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         
         ## Adapt mean and covariance
-        w_i = i^(-1)
+        w_i = i^(- (1 / (1 + exp(-(i / sqrt(P))))))
         @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
         @views lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))
