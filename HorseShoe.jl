@@ -67,11 +67,7 @@ function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) wh
     β = zeros(P)
     for i in 1:P
         if rand(Bernoulli(1 - sparsity)) == 1
-          if rand() < 0.2
-            β[i] = 5.0
-          else
-            β[i] = 1.0
-          end
+          β[i] = randn() * 2
         end
     end
 
@@ -88,10 +84,10 @@ end
 
 ### Low correlation
 
-N = 100
+N = 50
 P = 500
 
-X,Y, β = gen_data(N, P, ρ = 0.6, sparsity = 0.98)
+X,Y, β = gen_data(N, P, ρ = 0.6, sparsity = 0.98, σ_sq = 1.0)
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
 
 
@@ -116,6 +112,7 @@ ph = zeros(N)
       μ_AGESS, Σ, true, burnin = 0.5)
 
 AGESS_β = plot(x_AGESS[50000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 AGESS_β_0 = plot(x_AGESS[50000:10:end, findall(β .== 0)], legend = false, dpi = 300)
 
 ### GESS
@@ -155,6 +152,7 @@ beta_samps_half_t = half_t_chain$beta_samples
 @rget HS_time
 @rget beta_samps_half_t
 HS_β = plot(beta_samps_HS[findall(β .!= 0), 100000:10:end]', legend = false)
+hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false)
 
 half_t_β = plot(beta_samps_half_t[100000:end, findall(β .!= 0)], legend = false)
@@ -587,16 +585,20 @@ HS_time = time_end
 index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
 
 g1 = plot(median(beta_samps_HS1, dims = 2))
-plot!(median(x_AGESS[100000:end, 1:P], dims = 1)')
+plot!(median(x_AGESS1[100000:end, 1:P], dims = 1)')
 
 
 sortperm(abs.(median(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
 
 P = size(X)[2]
-MCMC_iters = 100000
+MCMC_iters = 200000
 x_AGESS1 = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)
-ph = zeros(N)
 AGESS_time = AGESS(x_AGESS1, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X, y_obs), 
-      μ_AGESS, Σ, true, burnin = 0.5, single_step_prop = 0.1)
+      μ_AGESS, Σ, true, burnin = 0.5)
+
+
+
+
+

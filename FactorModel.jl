@@ -62,8 +62,8 @@ function transform_posterior(Λ::AbstractVector{Y}, η::AbstractVector{Y}, Y_obs
 end
 
 K = 6
-N = 40
-P = 20
+N = 1000
+P = 500
 N_MCMC = 100000
 
 a_1 = 2.0
