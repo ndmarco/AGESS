@@ -274,6 +274,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
 
     Σ_ph =  LowerTriangular(diagm(ones(P)))
     μ_0 = zeros(P)
+    ph_cholesky_update = ones(P)
 
     for i in 2:n_MCMC
         if i == burnin_num
@@ -305,10 +306,11 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         
         ## Adapt mean and covariance
-        w_i = i^(- (1 / (1 + exp(-(i / sqrt(P))))))
+        w_i = i^(-1)
         @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .- μ_adapt))
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
+        lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
 
         ## Populate next value in Markov Chain
         if i < n_MCMC
@@ -497,6 +499,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
     acceptance = zeros(P)
     burnin_num = floor(Int64, burnin * n_MCMC)
     Σ_chol = cholesky(Σ)
+    ph_cholesky_update = ones(P)
 
     for i in 2:block1
         # Perform random walk proposal
@@ -555,7 +558,8 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         w_i = 1 / (i - half_warm_up_block)
         @views x_mean = (1 - w_i) * x_mean + w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views lowrankupdate!(Σ_chol_adapt, sqrt(w_i) .* (x[i,:] .-  x_mean))
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
+        lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
         Σ_rw .= (Σ_chol_adapt.L) .* scaling_Σ_I .* (2.38 / sqrt(P))
 
         if (i % tuning_step) == 0

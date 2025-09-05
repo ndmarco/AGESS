@@ -85,9 +85,9 @@ end
 ### Low correlation
 
 N = 50
-P = 500
+P = 100
 
-X,Y, β = gen_data(N, P, ρ = 0.6, sparsity = 0.98, σ_sq = 1.0)
+X,Y, β = gen_data(N, P, ρ = 0.9, sparsity = 0.98, σ_sq = 1.0)
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
 
 
@@ -103,15 +103,15 @@ Stan_β = plot(df[1:10:end, findall(β .!= 0)], legend = false)
 Stan_β_0 = plot(df[1:10:end, findall(β .== 0)], legend = false)
 
 ### AGESS
-MCMC_iters = 200000
+MCMC_iters = 100000
 x_AGESS = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)
 ph = zeros(N)
 @time AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
-      μ_AGESS, Σ, true, burnin = 0.5)
+      μ_AGESS, Σ, true, burnin = 0.5, single_step_prop = 0.1)
 
-AGESS_β = plot(x_AGESS[50000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+AGESS_β = plot(x_AGESS[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
 hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 AGESS_β_0 = plot(x_AGESS[50000:10:end, findall(β .== 0)], legend = false, dpi = 300)
 
@@ -566,6 +566,9 @@ y_obs = labp[1,]
 data(nirp)
 X = t(nirp$y)
 
+## Center and rescale
+X <- scale(X)
+
 # Run Horseshoe
 burnin <- 0
 chain_length <- 200000
@@ -582,10 +585,12 @@ HS_time = time_end
 @rget X
 @rget y_obs
 
+##
+
 index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
 
 g1 = plot(median(beta_samps_HS1, dims = 2))
-plot!(median(x_AGESS1[100000:end, 1:P], dims = 1)')
+scatter(median(x_AGESS1[100000:end, 1:P], dims = 1)')
 
 
 sortperm(abs.(median(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
