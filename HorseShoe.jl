@@ -687,3 +687,40 @@ save(string(dir ,"//Biscuit//Sim", i,".jld2"), Dict("x_AGESS" => x_AGESS,
                                                     "AGESS_total_time" => AGESS_total_time,
                                                     "HS_time" => HS_time,
                                                     "half_t_time" => half_t_time))
+
+
+
+#### Riboflavin
+R"""
+library(hdi)
+data(riboflavin)
+dim2 <- dim(riboflavin$x)[2]
+corr <- rep(0, dim2)
+for(i in 1:dim2){
+  corr[i] <- cor(riboflavin$y, riboflavin$x[,i])
+}
+corr <- abs(corr)
+ind <- order(corr)
+X <- riboflavin$x[,ind[(dim2-499):dim2]]
+X <- scale(X)
+y_obs <- riboflavin$y - mean(riboflavin$y)
+
+X_train <- X[1:50,]
+y_train <- y_obs[1:50,]
+X_test <- X[51:length(y_obs),]
+y_test <- y_obs[51:length(y_obs),]
+
+burnin <- 0
+chain_length <- 400000
+chain <- NA
+time1 = Sys.time()
+hs_chain <- horseshoe(y_train, X_train, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+time_end = Sys.time() - time1
+beta_samps_HS = hs_chain$BetaSamples
+HS_time = time_end
+sigma_samps_HS = hs_chain$Sigma2Samples
+"""
+@rget beta_samps_HS
+@rget sigma_samps_HS
+
+g1 = scatter(mean(beta_samps_HS[:,200000:end], dims = 2))

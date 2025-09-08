@@ -597,23 +597,3 @@ function ARW_SingleStep_1d(x::AbstractVector{Y}, log_likelihood::Function, log_p
 
     return nothing
 end
-
-
-#Σ = rand(InverseWishart(101.0, diagm(ones(100))))
-#P = 100
-#
-#x = randn(100,100)
-#x1 = deepcopy(x)
-#Σ_ph =  LowerTriangular(diagm(ones(P)))
-#μ_0 = zeros(P)
-#ph_cholesky_update = ones(P)
-#i = 50
-#w_i = i^(-1)
-#μ_adapt = zeros(100)
-#Σ_chol_adapt = cholesky(Σ)
-#@views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
-#@views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] - μ_adapt)
-#lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
-#
-#
-#Σ_chol_adapt.L * Σ_chol_adapt.U - (Σ + ph_cholesky_update * ph_cholesky_update')
