@@ -60,7 +60,12 @@ function log_posterior(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::
 end
 
 function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) where {Y<:AbstractFloat, T<:Integer}
-    Σ = ones(P, P) * ρ
+    Σ = ones(P, P) 
+    for i in 1:P
+      for j in 1:P
+        Σ[i,j] = ρ^(abs(i - j))
+      end
+    end
     Σ[diagind(Σ)] .= 1
     X = zeros(N, P)
     X .= rand(MultivariateNormal(zeros(P), Σ), N)'
@@ -87,7 +92,7 @@ end
 N = 50
 P = 100
 
-X,Y, β = gen_data(N, P, ρ = 0.9, sparsity = 0.98, σ_sq = 1.0)
+X,Y, β = gen_data(N, P, ρ = 0.9, sparsity = 0.8, σ_sq = 0.5)
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
 
 
@@ -103,17 +108,17 @@ Stan_β = plot(df[1:10:end, findall(β .!= 0)], legend = false)
 Stan_β_0 = plot(df[1:10:end, findall(β .== 0)], legend = false)
 
 ### AGESS
-MCMC_iters = 100000
+MCMC_iters = 200000
 x_AGESS = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)
 ph = zeros(N)
 @time AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
-      μ_AGESS, Σ, true, burnin = 0.5, single_step_prop = 0.1)
+      μ_AGESS, Σ, true, burnin = 0.5)
 
 AGESS_β = plot(x_AGESS[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
 hline!(β[findall(β .!= 0)], line = :dash, color =:black)
-AGESS_β_0 = plot(x_AGESS[50000:10:end, findall(β .== 0)], legend = false, dpi = 300)
+AGESS_β_0 = plot(x_AGESS[1:10:end, findall(β .== 0)], legend = false, dpi = 300)
 
 ### GESS
 x_GESS = zeros(MCMC_iters, 2*P+2)
@@ -154,6 +159,21 @@ beta_samps_half_t = half_t_chain$beta_samples
 HS_β = plot(beta_samps_HS[findall(β .!= 0), 100000:10:end]', legend = false)
 hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false)
+
+ind = findall(β .!= 0)
+ind1 = ind[5]
+ind2 = ind[2]
+
+plot(kde((beta_samps_HS[ind1,:], beta_samps_HS[ind2,:])))
+scatter!((β[ind1], β[ind2]))
+plot(kde((x_AGESS[100000:end,ind1], x_AGESS[100000:end,ind2])))
+scatter!((β[ind1], β[ind2]))
+
+scatter(mean(beta_samps_HS, dims = 2))
+scatter!(β)
+scatter!(median(x_AGESS[100000:end, 1:P], dims = 1)')
+
+histogram(β)
 
 half_t_β = plot(beta_samps_half_t[100000:end, findall(β .!= 0)], legend = false)
 half_t_β_0 = plot(beta_samps_half_t[100000:end, findall(β .== 0)], legend = false)
@@ -491,7 +511,7 @@ function log_posterior_Poisson(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{
   lpdf::Float64 = 0.0
   ## Likelihood
   for i in eachindex(y)
-    @views lpdf += logpdf(Poisson(exp(dot(X[i,:], β) + 1)), y[i])
+    @views lpdf += logpdf(Poisson(exp(dot(X[i,:], β))), y[i])
   end
   ## Prior 
   lpdf += prior_β(β, τ, λ, 0.0) + prior_λ(λ) + logpdf(Cauchy(0,1), exp(τ)) + τ
@@ -500,27 +520,31 @@ function log_posterior_Poisson(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{
 end
 
 function gen_data_Poisson(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2) where {Y<:AbstractFloat, T<:Integer}
-    Σ = ones(P, P) * ρ
-    Σ[diagind(Σ)] .= 1
+    Σ = ones(P, P) 
+    for i in 1:P
+      for j in 1:P
+        Σ[i,j] = ρ^(abs(i - j))
+      end
+    end
     X = zeros(N, P)
     X .= rand(MultivariateNormal(zeros(P), Σ), N)'
     β = zeros(P)
     for i in 1:P
         if rand(Bernoulli(1 - sparsity)) == 1
-            β[i] = rand(TDist(2.0))* 0.6
+            β[i] = rand(TDist(2.0))
         end
     end
 
     Y_obs = zeros(Integer, N)
     for i in 1:N
-      Y_obs[i] = rand(Poisson(exp(dot(X[i,:], β) + 1)))
+      Y_obs[i] = rand(Poisson(exp(dot(X[i,:], β))))
     end
 
     return X, Y_obs, β
 end
 
-N = 100
-P = 200
+N = 50
+P = 100
 
 X, Y, β = gen_data_Poisson(N, P, ρ = 0.2, sparsity = 0.95)
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
@@ -549,7 +573,7 @@ beta_samples <- rv.pois$beta
 """
 
 @rget beta_samples
-br_β_HC = plot(beta_samples[findall(β .!= 0), 1:10:end,], legend = false)
+br_β_HC = plot(beta_samples[findall(β .!= 0), 1:10:end]', legend = false)
 br_β_0_HC = plot(beta_samples[findall(β .== 0), 1:10:end,], legend = false)
 
 
@@ -561,49 +585,105 @@ br_β_0_HC = plot(beta_samples[findall(β .== 0), 1:10:end,], legend = false)
 R"""
 library(fds)
 library(horseshoe)
+data(labc)
+y_pred = labc[1,]
 data(labp)
 y_obs = labp[1,]
+y_pred = y_pred - mean(y_obs)
+y_obs = y_obs - mean(y_obs)
 data(nirp)
+data(nirc)
 X = t(nirp$y)
+X_pred = t(nirc$y)
 
 ## Center and rescale
-X <- scale(X)
+for(i in 1:ncol(X)){
+  X_pred[,i] <- (X_pred[,i] - mean(X[,i])) / sd(X[,i])
+  X[,i] <- (X[,i] - mean(X[,i])) / sd(X[,i])
+}
 
+
+
+X_transpose <- t(X)
 # Run Horseshoe
 burnin <- 0
-chain_length <- 200000
+chain_length <- 400000
 chain <- NA
 time1 = Sys.time()
 hs_chain <- horseshoe(y_obs, X, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
 time_end = Sys.time() - time1
-beta_samps_HS1 = hs_chain$BetaSamples
+beta_samps_HS = hs_chain$BetaSamples
 HS_time = time_end
+sigma_samps_HS = hs_chain$Sigma2Samples
 
+time1 = Sys.time()
+half_t_chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y_obs, t_dist_df=3)
+time_end = Sys.time() - time1
+half_t_time = time_end
+beta_samps_half_t = half_t_chain$beta_samples
+sigma_samps_half_t = half_t_chain$sigma2_samples
 """
-@rget beta_samps_HS1
+@rget beta_samps_HS
+@rget beta_samps_half_t
 @rget HS_time
+@rget half_t_time
 @rget X
 @rget y_obs
-
+@rget X_pred
+@rget y_pred
+@rget sigma_samps_HS
+@rget sigma_samps_half_t
 ##
 
 index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
 
-g1 = plot(median(beta_samps_HS1, dims = 2))
-scatter(median(x_AGESS1[100000:end, 1:P], dims = 1)')
+g1 = scatter(mean(beta_samps_HS, dims = 2))
+scatter!(median(beta_samps_HS2, dims = 2))
+g1 = scatter(median(beta_samps_half_t1, dims = 1)')
+scatter(median(beta_samps_half_t1, dims = 1)')
+scatter!(median(x_AGESS1[100000:end, 1:P], dims = 1)')
 
+ind = sortperm(abs.(median(beta_samps_HS2, dims = 2)), dims = 1)
 
 sortperm(abs.(median(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
 
 P = size(X)[2]
-MCMC_iters = 200000
-x_AGESS1 = zeros(MCMC_iters, 2*P+2)
+MCMC_iters = 400000
+x_AGESS = zeros(MCMC_iters, 2*P+2)
 Σ = diagm(ones(2*P+2))
 μ_AGESS = zeros(2*P+2)
-AGESS_time = AGESS(x_AGESS1, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X, y_obs), 
+t1 = time()
+AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X, y_obs), 
       μ_AGESS, Σ, true, burnin = 0.5)
+AGESS_total_time = time() - t1
 
 
 
+function elppd(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}, σ_samples::AbstractVector{Y}) where {Y<:AbstractFloat}
+    lppd = zeros(length(Y_obs))
+    for i in 1:length(Y_obs)
+      for j in 1:size(β_samples)[1]
+        @views lppd[i] += pdf(Normal(dot(X[i,:], β_samples[j,:]), σ_samples[j]), Y_obs[i])
+      end
+      lppd[i] /= size(β_samples)[1]
+      lppd[i] = log(lppd[i])
+    end
 
+  return lppd
+end
 
+elppd_agess = elppd(X_pred, y_pred, x_AGESS[200000:end,1:P], exp.(x_AGESS[200000:end,2*P +2]))
+elppd_HS = elppd(X_pred, y_pred, beta_samps_HS[:,200000:end]', sqrt.(sigma_samps_HS[200000:end]))
+elppd_half_t = elppd(X_pred, y_pred, beta_samps_half_t[200000:end,:], sqrt.(sigma_samps_half_t[200000:end]))
+
+save(string(dir ,"//Biscuit//Sim", i,".jld2"), Dict("x_AGESS" => x_AGESS, 
+                                                    "beta_samps_HS" => beta_samps_HS,
+                                                    "beta_samps_half_t" => beta_samps_half_t,
+                                                    "sigma_samps_HS" => sigma_samps_HS,
+                                                    "sigma_samps_half_t" => sigma_samps_half_t,
+                                                    "elppd_agess" => elppd_agess1,
+                                                    "elppd_HS" => elppd_HS,
+                                                    "elppd_half_t" => elppd_half_t,
+                                                    "AGESS_total_time" => AGESS_total_time,
+                                                    "HS_time" => HS_time,
+                                                    "half_t_time" => half_t_time))

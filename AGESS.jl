@@ -88,7 +88,7 @@ function GESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_posteri
     P = size(x)[2]
 
     α = 0.5 * (ν + P)
-    ph .= (x .- μ)
+    @views ph .= (x[i,:] .- μ)
     ph .= ((Σ_chol) \ ph)
     β = 0.5 * (ν + dot(ph,ph))
     s = rand(InverseGamma(α, β))
@@ -306,11 +306,12 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         
         ## Adapt mean and covariance
-        w_i = i^(-1)
-        @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
-        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
+ 
+        w_i = i^(- (1 / (1 + exp(-(i / sqrt(P))))))
+        Σ_chol_adapt.U .*= sqrt((1 - w_i))
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] - μ_adapt)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
+        @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
 
         ## Populate next value in Markov Chain
         if i < n_MCMC
@@ -558,7 +559,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         w_i = 1 / (i - half_warm_up_block)
         @views x_mean = (1 - w_i) * x_mean + w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- x_mean)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
         Σ_rw .= (Σ_chol_adapt.L) .* scaling_Σ_I .* (2.38 / sqrt(P))
 
@@ -596,3 +597,23 @@ function ARW_SingleStep_1d(x::AbstractVector{Y}, log_likelihood::Function, log_p
 
     return nothing
 end
+
+
+#Σ = rand(InverseWishart(101.0, diagm(ones(100))))
+#P = 100
+#
+#x = randn(100,100)
+#x1 = deepcopy(x)
+#Σ_ph =  LowerTriangular(diagm(ones(P)))
+#μ_0 = zeros(P)
+#ph_cholesky_update = ones(P)
+#i = 50
+#w_i = i^(-1)
+#μ_adapt = zeros(100)
+#Σ_chol_adapt = cholesky(Σ)
+#@views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
+#@views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] - μ_adapt)
+#lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
+#
+#
+#Σ_chol_adapt.L * Σ_chol_adapt.U - (Σ + ph_cholesky_update * ph_cholesky_update')
