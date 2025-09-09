@@ -33,14 +33,14 @@ model {
 function prior_β(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::Y)::Float64 where {Y<:AbstractFloat}
   lpdf::Float64 = 0.0
   for i in eachindex(β)
-      @views lpdf += logpdf(Normal(0, exp(σ) * exp(τ) * exp(λ[i])), β[i])
+      @views lpdf += logpdf(Normal(0.0, exp(σ) * exp(τ) * exp(λ[i])), β[i])
   end
   return lpdf
 end
 
 function prior_λ(λ::AbstractVector{Y})::Float64 where {Y<:AbstractFloat}
   lpdf::Float64 = 0.0
-  cauchy_d = Cauchy(0,1)
+  cauchy_d = Cauchy(0.0,1.0)
   for i in eachindex(λ)
       @views lpdf += logpdf(cauchy_d, exp(λ[i])) + λ[i]
   end
@@ -54,7 +54,7 @@ function log_posterior(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::
     @views lpdf += logpdf(Normal(dot(X[i,:], β), exp(σ)), y[i])
   end
   ## Prior 
-  lpdf += prior_β(β, τ, λ, σ) + prior_λ(λ) + logpdf(Cauchy(0,1), exp(τ)) + τ - σ
+  lpdf += prior_β(β, τ, λ, σ) + prior_λ(λ) + logpdf(Cauchy(0.0,1.0), exp(τ)) + τ - σ
 
   return lpdf
 end
@@ -72,7 +72,7 @@ function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) wh
     β = zeros(P)
     for i in 1:P
         if rand(Bernoulli(1 - sparsity)) == 1
-          β[i] = randn() * 2
+          β[i] = (rand() * 3 + 1) * (-1)^i
         end
     end
 
@@ -92,7 +92,11 @@ end
 N = 50
 P = 100
 
-X,Y, β = gen_data(N, P, ρ = 0.9, sparsity = 0.8, σ_sq = 0.5)
+for i in 1:10
+
+end
+
+X,Y, β = gen_data(N, P, ρ = 0.3, sparsity = 0.95, σ_sq = 1.0)
 data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
 
 
@@ -105,6 +109,7 @@ df = read_samples(sm_HS, :array);
 df = df[:,:,1]
 
 Stan_β = plot(df[1:10:end, findall(β .!= 0)], legend = false)
+hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 Stan_β_0 = plot(df[1:10:end, findall(β .== 0)], legend = false)
 
 ### AGESS
@@ -119,7 +124,6 @@ ph = zeros(N)
 AGESS_β = plot(x_AGESS[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
 hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 AGESS_β_0 = plot(x_AGESS[1:10:end, findall(β .== 0)], legend = false, dpi = 300)
-
 ### GESS
 x_GESS = zeros(MCMC_iters, 2*P+2)
 x_GESS[:,(2*P+1):end] .= 0.5
@@ -128,6 +132,7 @@ GESS_time = GESS(x_GESS,  b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b
                  μ_GESS, Σ)
 
 GESS_β = plot(x_GESS[100000:end, findall(β .!= 0)], legend = false)
+hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 GESS_β_0 = plot(x_GESS[100000:end, findall(β .== 0)], legend = false)
 
 @rput X
@@ -147,15 +152,9 @@ time_end = Sys.time() - time1
 beta_samps_HS = hs_chain$BetaSamples
 HS_time = time_end
 
-time1 = Sys.time()
-half_t_chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, Y, t_dist_df=3)
-time_end = Sys.time() - time1
-half_t_time = time_end
-beta_samps_half_t = half_t_chain$beta_samples
 """
 @rget beta_samps_HS
 @rget HS_time
-@rget beta_samps_half_t
 HS_β = plot(beta_samps_HS[findall(β .!= 0), 100000:10:end]', legend = false)
 hline!(β[findall(β .!= 0)], line = :dash, color =:black)
 HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false)
@@ -164,10 +163,6 @@ ind = findall(β .!= 0)
 ind1 = ind[5]
 ind2 = ind[2]
 
-plot(kde((beta_samps_HS[ind1,:], beta_samps_HS[ind2,:])))
-scatter!((β[ind1], β[ind2]))
-plot(kde((x_AGESS[100000:end,ind1], x_AGESS[100000:end,ind2])))
-scatter!((β[ind1], β[ind2]))
 
 scatter(mean(beta_samps_HS, dims = 2))
 scatter!(β)
@@ -593,8 +588,8 @@ y_pred = y_pred - mean(y_obs)
 y_obs = y_obs - mean(y_obs)
 data(nirp)
 data(nirc)
-X = t(nirp$y)
-X_pred = t(nirc$y)
+X = t(nirp$y[seq(from = 1, to = 700, by = 2),])
+X_pred = t(nirc$y[seq(from = 1, to = 700, by = 2),])
 
 ## Center and rescale
 for(i in 1:ncol(X)){
@@ -615,24 +610,14 @@ time_end = Sys.time() - time1
 beta_samps_HS = hs_chain$BetaSamples
 HS_time = time_end
 sigma_samps_HS = hs_chain$Sigma2Samples
-
-time1 = Sys.time()
-half_t_chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y_obs, t_dist_df=3)
-time_end = Sys.time() - time1
-half_t_time = time_end
-beta_samps_half_t = half_t_chain$beta_samples
-sigma_samps_half_t = half_t_chain$sigma2_samples
 """
 @rget beta_samps_HS
-@rget beta_samps_half_t
 @rget HS_time
-@rget half_t_time
 @rget X
 @rget y_obs
 @rget X_pred
 @rget y_pred
 @rget sigma_samps_HS
-@rget sigma_samps_half_t
 ##
 
 index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
@@ -641,7 +626,7 @@ g1 = scatter(mean(beta_samps_HS, dims = 2))
 scatter!(median(beta_samps_HS2, dims = 2))
 g1 = scatter(median(beta_samps_half_t1, dims = 1)')
 scatter(median(beta_samps_half_t1, dims = 1)')
-scatter!(median(x_AGESS1[100000:end, 1:P], dims = 1)')
+scatter!(median(x_AGESS[100000:end, 1:P], dims = 1)')
 
 ind = sortperm(abs.(median(beta_samps_HS2, dims = 2)), dims = 1)
 
@@ -672,9 +657,21 @@ function elppd(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::Abstr
   return lppd
 end
 
+function RMSE(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}) where {Y<:AbstractFloat}
+  β = mean(β_samples, dims = 1)
+  Y_pred = X * β'
+  RMSE = sum((Y_obs - Y_pred).^2)
+
+  return RMSE
+end
+
 elppd_agess = elppd(X_pred, y_pred, x_AGESS[200000:end,1:P], exp.(x_AGESS[200000:end,2*P +2]))
 elppd_HS = elppd(X_pred, y_pred, beta_samps_HS[:,200000:end]', sqrt.(sigma_samps_HS[200000:end]))
 elppd_half_t = elppd(X_pred, y_pred, beta_samps_half_t[200000:end,:], sqrt.(sigma_samps_half_t[200000:end]))
+
+RMSE_agess = RMSE(X_pred, y_pred, x_AGESS[200000:end,1:P])
+RMSE_HS = RMSE(X_pred, y_pred, beta_samps_HS[:,200000:end]')
+RMSE_half_t = RMSE(X_pred, y_pred, beta_samps_half_t[200000:end,:])
 
 save(string(dir ,"//Biscuit//Sim", i,".jld2"), Dict("x_AGESS" => x_AGESS, 
                                                     "beta_samps_HS" => beta_samps_HS,
@@ -695,20 +692,28 @@ R"""
 library(hdi)
 data(riboflavin)
 dim2 <- dim(riboflavin$x)[2]
+X <-  riboflavin$x
+y_obs <- riboflavin$y
+X_train <- X[1:50,]
+y_train <- y_obs[1:50]
+X_test <- X[51:length(y_obs),]
+y_test <- y_obs[51:length(y_obs)]
 corr <- rep(0, dim2)
 for(i in 1:dim2){
-  corr[i] <- cor(riboflavin$y, riboflavin$x[,i])
+  corr[i] <- cor(y_train, X_train[,i])
 }
 corr <- abs(corr)
 ind <- order(corr)
-X <- riboflavin$x[,ind[(dim2-499):dim2]]
-X <- scale(X)
-y_obs <- riboflavin$y - mean(riboflavin$y)
+X_test <- X_test[,ind[(dim2-499):dim2]]
+X_train <- X_train[,ind[(dim2-499):dim2]]
 
-X_train <- X[1:50,]
-y_train <- y_obs[1:50,]
-X_test <- X[51:length(y_obs),]
-y_test <- y_obs[51:length(y_obs),]
+
+for(i in 1:ncol(X_train)){
+  X_test[,i] <- (X_test[,i] - mean(X_train[,i])) / sd(X_train[,i])
+  X_train[,i] <- (X_train[,i] - mean(X_train[,i])) / sd(X_train[,i])
+}
+y_test <- y_test - mean(y_train)
+y_train <- y_train - mean(y_train)
 
 burnin <- 0
 chain_length <- 400000
@@ -722,5 +727,6 @@ sigma_samps_HS = hs_chain$Sigma2Samples
 """
 @rget beta_samps_HS
 @rget sigma_samps_HS
+@rget HS_time
 
 g1 = scatter(mean(beta_samps_HS[:,200000:end], dims = 2))

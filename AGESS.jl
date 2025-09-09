@@ -215,6 +215,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
     @views x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
     @views L_star = log_posterior(x[i,:])::Float64 
     if t_dist == true
+        ### Add conditioning
         @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)::Float64
     else
         @views L_star -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt, ph)::Float64
@@ -282,17 +283,13 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         end
 
         if P >= 10
-            if i < burnin_num * single_step_prop
+            if rand() > ϵ
+                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
+                                    Σ_chol_adapt.L, i)
+            elseif rand() > 0.5
                 AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
             else
-                if rand() > ϵ
-                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
-                                        Σ_chol_adapt.L, i)
-                elseif rand() > 0.5
-                    AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
-                else
-                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
-                end
+                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
             end
         else
             if rand() > ϵ
@@ -306,10 +303,9 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         
         ## Adapt mean and covariance
- 
-        w_i = i^(- (1 / (1 + exp(-(i / sqrt(P))))))
-        Σ_chol_adapt.U .*= sqrt((1 - w_i))
-        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] - μ_adapt)
+        w_i = i^(-1)
+        Σ_chol_adapt.U .*= sqrt(1 - w_i)
+        @views ph_cholesky_update .= sqrt(w_i) * (x[i,:] - μ_adapt)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
         @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
 
