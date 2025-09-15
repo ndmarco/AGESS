@@ -73,7 +73,7 @@ function ESS(x::AbstractMatrix{Y}, log_likelihood::Function, μ::AbstractVector{
         end
 
         ## Update User
-        if (i % 25) == 0
+        if (i % 1000) == 0
             println("MCMC iter: ", i)
             log_lik = @sprintf("%.2f", log_likelihood(x[i,:]))
             println("Log Likelihood: ", log_lik)
@@ -122,7 +122,7 @@ function GESS(x::AbstractMatrix{Y}, log_posterior::Function, μ::AbstractVector{
         end
 
         ## Update User
-        if (i % 25) == 0
+        if (i % 1000) == 0
             println("MCMC iter: ", i)
             @views log_pos = @sprintf("%.2f", log_posterior(x[i,:]))
             println("Log Posterior: ", log_pos)
@@ -156,25 +156,12 @@ function cond_rMvT!(z::AbstractVector{Y}, x::AbstractVector{Y}, μ::AbstractVect
     ph .= (x .- μ)
     ph .= ((Σ_chol) \ ph)
     d = dot(ph, ph)
-    ν1 = ν + P
-    z .*= sqrt((ν + d) / ν1)
-    z .*=  1 / sqrt(rand(Gamma(ν1/2, 2/ν1)))
+    ṽ = ν + P
+    z .*= sqrt((ν + d) / ṽ)
+    z .*=  1 / sqrt(rand(Gamma(ṽ/2, 2/ṽ)))
     z .+= μ
 
     return nothing
-end
-
-function cond_dMvT!(z::AbstractVector{Y}, x::AbstractVector{Y}, μ::AbstractVector{Y}, 
-                    Σ_chol::LowerTriangular{Y, <:AbstractMatrix{Y}}, ν::Y, ph::AbstractVector{Y}, 
-                    Σ_chol_ph::LowerTriangular{Y, <:AbstractMatrix{Y}}, P::T) where {Y<:AbstractFloat, T<:Integer}
-    ph .= (x .- μ)
-    ph .= ((Σ_chol) \ ph)
-    d = dot(ph, ph)
-    ν1 = ν + P
-    Σ_chol_ph .= sqrt((ν + d) / ν1) * Σ_chol
-    pdf::Float64 = dMvT(z, μ, Σ_chol_ph, ph, ν1, P)
-
-    return pdf
 end
 
 function dMvT_1d(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
@@ -190,27 +177,18 @@ end
 function cond_rMvT_1d!(x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
     z::Float64 = σ * randn() 
     d = (x - μ)^2 / (σ^2)
-    ν1 = ν + 1
-    z *= sqrt((ν + d) / ν1)
-    z *= 1 / sqrt(rand(Gamma(ν1/2, 2/ ν1)))
+    ṽ = ν + 1
+    z *= sqrt((ν + d) / ṽ)
+    z *= 1 / sqrt(rand(Gamma(ṽ/2, 2/ ṽ)))
     z += μ
 
     return z
 end
-
-function cond_dMvT_1d!(z::Y, x::Y, μ::Y, σ::Y, ν::Y) where {Y<:AbstractFloat}
-    d = ((x - μ) / σ)^2
-    ν1 = ν + 1
-    σ_ph = sqrt((ν + d) / ν1) * σ
-    pdf::Float64 = dMvT_1d(z, μ, σ_ph, ν1)
-
-    return pdf
-end
+    
 
 function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_posterior::Function, 
                           ph::AbstractVector{Y}, t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y},
-                          Σ_chol_adapt::LowerTriangular{Y, <:AbstractMatrix{Y}}, 
-                          Σ_chol_ph::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
+                          Σ_chol_adapt::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
     P = size(x)[2]
     y::Float64 = 0.0
     L_star::Float64 = 0.0
@@ -223,7 +201,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
 
     @views y = log_posterior(x[i,:])::Float64 + log(rand())
     if t_dist == true
-        @views y -= cond_dMvT!(x[i,:], z, μ_adapt, Σ_chol_adapt, ph, ν, Σ_chol_ph, P)::Float64
+        @views y -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)::Float64
     else
         @views y -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt, ph)::Float64
     end
@@ -237,8 +215,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
     @views x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
     @views L_star = log_posterior(x[i,:])::Float64 
     if t_dist == true
-        ### Add conditioning
-        @views L_star -= dcond_dMvT!(x[i,:], z, μ_adapt, Σ_chol_adapt, ph, ν, Σ_chol_ph, P)::Float64
+        @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)::Float64
     else
         @views L_star -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt, ph)::Float64
     end
@@ -263,7 +240,7 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
         @views x[i,:] .= ((x[i-1,:] - μ_adapt) .* cos(θ) .+  (z - μ_adapt) .* sin(θ)) .+ μ_adapt
         @views L_star = log_posterior(x[i,:])::Float64 
         if t_dist == true
-            @views L_star -= cond_dMvT!(x[i,:], z, μ_adapt, Σ_chol_adapt, ph, ν, Σ_chol_ph, P)::Float64
+            @views L_star -= dMvT(x[i,:], μ_adapt, Σ_chol_adapt, ph, ν, P)::Float64
         else
             @views L_star -= dMvN(x[i,:], μ_adapt, Σ_chol_adapt, ph)::Float64
         end
@@ -296,7 +273,6 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
     Σ_chol_adapt = deepcopy(Σ_chol)
 
     Σ_ph =  LowerTriangular(diagm(ones(P)))
-    Σ_ph1 =  LowerTriangular(diagm(ones(P)))
     μ_0 = zeros(P)
     ph_cholesky_update = ones(P)
 
@@ -306,20 +282,24 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         end
 
         if P >= 10
-            if rand() > ϵ
-                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
-                                    Σ_chol_adapt.L, Σ_ph1, i)
-            elseif rand() > 0.5
+            if i < burnin_num * single_step_prop
                 AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
             else
-                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, Σ_ph1, i)
+                if rand() > ϵ
+                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
+                                        Σ_chol_adapt.L, i)
+                elseif rand() > 0.5
+                    AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
+                else
+                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
+                end
             end
         else
             if rand() > ϵ
                 AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
-                                        Σ_chol_adapt.L, Σ_ph1, i)
+                                        Σ_chol_adapt.L, i)
             else
-                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, Σ_ph1, i)
+                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
             end
 
         end
@@ -327,8 +307,8 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         ## Adapt mean and covariance
         w_i = i^(-1)
-        Σ_chol_adapt.U .*= sqrt(1 - w_i)
-        @views ph_cholesky_update .= sqrt(w_i) * (x[i,:] - μ_adapt)
+        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
         @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
 
@@ -362,7 +342,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
     end
 
-    return time() - t1, Σ_chol_adapt.L * Σ_chol_adapt.U
+    return time() - t1, Σ_chol_adapt.L * Σ_chol_adapt.U, μ_adapt
 end
 
 function AGESS_SingleStep_1d(x::AbstractMatrix{Y}, log_posterior::Function, 
@@ -441,8 +421,7 @@ function AGESS_SingleStep_1d(x::AbstractMatrix{Y}, log_posterior::Function,
 end
 
 function AGESS_SingleStep_1d_single(x::AbstractMatrix{Y}, log_posterior::Function, 
-                                    t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y}, 
-                                    Σ_chol_adapt::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T, j::T) where {Y<:AbstractFloat, T<:Integer}
+                                    t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y}, Σ_chol_adapt::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T, j::T) where {Y<:AbstractFloat, T<:Integer}
 
     z = 0.0
     ## Propose new z from N(0, Σ)
@@ -454,7 +433,7 @@ function AGESS_SingleStep_1d_single(x::AbstractMatrix{Y}, log_posterior::Functio
 
     @views y = log_posterior(x[i,:]) + log(rand(1)[1])
     if t_dist == true
-        y -= cond_dMvT_1d!(x[i,j], z, μ_adapt[j], Σ_chol_adapt[j,j], ν)
+        y -= dMvT_1d(x[i,j], μ_adapt[j], Σ_chol_adapt[j,j], ν)
     else
         y -= dMvN_1d(x[i,j], μ_adapt[j], Σ_chol_adapt[j,j])
     end
@@ -468,7 +447,7 @@ function AGESS_SingleStep_1d_single(x::AbstractMatrix{Y}, log_posterior::Functio
     x[i,j] = ((x[i-1,j] - μ_adapt[j]) * cos(θ) +  (z - μ_adapt[j]) * sin(θ)) + μ_adapt[j]
     @views L_star = log_posterior(x[i,:]) 
     if t_dist == true
-        L_star -= cond_dMvT_1d!(x[i,j], z, μ_adapt[j], Σ_chol_adapt[j,j], ν)
+        L_star -= dMvT_1d(x[i,j], μ_adapt[j], Σ_chol_adapt[j,j], ν)
     else
         L_star -= dMvN_1d(x[i,j], μ_adapt[j], Σ_chol_adapt[j,j])
     end
@@ -493,7 +472,7 @@ function AGESS_SingleStep_1d_single(x::AbstractMatrix{Y}, log_posterior::Functio
         x[i,j] = ((x[i-1,j] - μ_adapt[j]) * cos(θ) +  (z - μ_adapt[j]) * sin(θ)) + μ_adapt[j]
         @views L_star = log_posterior(x[i,:])
         if t_dist == true
-            L_star -= cond_dMvT_1d!(x[i,j], z, μ_adapt[j], Σ_chol_adapt[j,j], ν)
+            L_star -= dMvT_1d(x[i,j], μ_adapt[j], Σ_chol_adapt[j,j], ν)
         else
             L_star -= dMvN_1d(x[i,j], μ_adapt[j], Σ_chol_adapt[j,j])
         end
@@ -579,7 +558,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         w_i = 1 / (i - half_warm_up_block)
         @views x_mean = (1 - w_i) * x_mean + w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- x_mean)
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
         Σ_rw .= (Σ_chol_adapt.L) .* scaling_Σ_I .* (2.38 / sqrt(P))
 
@@ -617,3 +596,6 @@ function ARW_SingleStep_1d(x::AbstractVector{Y}, log_likelihood::Function, log_p
 
     return nothing
 end
+
+
+
