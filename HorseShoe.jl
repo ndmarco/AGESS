@@ -1,12 +1,12 @@
 using StanBase
-set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-#set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
+#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
+set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity
 
-dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
-#dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Horseshoe"
+#dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
+dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Horseshoe"
 model = "
 data {
   int N;
@@ -272,17 +272,6 @@ sigma_samps_HS = hs_chain$Sigma2Samples
 @rget sigma_samps_HS
 ##
 
-index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
-
-g1 = scatter(mean(beta_samps_HS, dims = 2))
-scatter!(median(beta_samps_HS2, dims = 2))
-g1 = scatter(median(beta_samps_half_t1, dims = 1)')
-scatter(median(beta_samps_half_t1, dims = 1)')
-scatter!(median(x_AGESS[100000:end, 1:P], dims = 1)')
-
-ind = sortperm(abs.(median(beta_samps_HS2, dims = 2)), dims = 1)
-
-sortperm(abs.(mean(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
 
 P = size(X)[2]
 MCMC_iters = 400000
@@ -294,6 +283,30 @@ AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)],
       μ_AGESS, Σ, true, burnin = 0.5)
 AGESS_total_time = time() - t1
 
+
+data = Dict("N" => 32, "P" => 700, "X" => X, "y" => y_obs)
+  
+  
+### STAN
+sm_HS = SampleModel("HorseShoe", model);
+t1 = time()
+rc = stan_sample(sm_HS; num_chains=1, num_warmups=10000, num_samples=400000, data);
+stan_time = time() - t1
+df = read_samples(sm_HS, :array);
+df = df[:,:,1]
+
+
+index_order = sortperm(abs.(mean(beta_samps_HS, dims = 2)), dims = 1)
+
+g1 = scatter(mean(beta_samps_HS, dims = 2))
+scatter!(median(beta_samps_HS2, dims = 2))
+g1 = scatter(median(beta_samps_half_t1, dims = 1)')
+scatter(median(beta_samps_half_t1, dims = 1)')
+scatter!(median(x_AGESS[100000:end, 1:P], dims = 1)')
+
+ind = sortperm(abs.(median(beta_samps_HS2, dims = 2)), dims = 1)
+
+sortperm(abs.(mean(x_AGESS1[100000:end, 1:P], dims = 1)), dims = 2)
 
 
 function elppd(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}, σ_samples::AbstractVector{Y}) where {Y<:AbstractFloat}
@@ -319,9 +332,14 @@ end
 
 elppd_agess = elppd(X_pred, y_pred, x_AGESS[100000:end,1:P], exp.(x_AGESS[100000:end,2*P +2]))
 elppd_HS = elppd(X_pred, y_pred, beta_samps_HS[:,100000:end]', sqrt.(sigma_samps_HS[100000:end]))
+elppd_stan = elppd(X_pred, y_pred, df[:,1:P], df[:,2*P +2])
+sum(elppd_agess)
+sum(elppd_HS)
+sum(elppd_stan)
 
 RMSE_agess = RMSE(X_pred, y_pred, x_AGESS[100000:end,1:P])
 RMSE_HS = RMSE(X_pred, y_pred, beta_samps_HS[:,100000:end]')
+RMSE_stan = RMSE(X_pred, y_pred, df[:,1:P])
 
 g1 = scatter!(mean(beta_samps_HS[:,100000:end], dims = 2))
 scatter!(mean(x_AGESS[100000:end, 1:P], dims = 1)')
@@ -334,6 +352,12 @@ plot!(size = (500,300))
 HS_order = sortperm(abs.(mean(beta_samps_HS[:, 100000:end], dims = 2)), dims = 1)
 plot(beta_samps_HS[HS_order[P-9:P], 100000:30:end]', labels = false)
 plot!(size = (500,300))
+
+Stan_order = sortperm(abs.(mean(df[:, 1:P], dims = 1)), dims = 2)
+plot(x_AGESS[1:30:end,Stan_order[P-9:P]], labels = false)
+plot!(size = (500,300))
+
+
 save(string(dir ,"//Biscuit//Sim", i,".jld2"), Dict("x_AGESS" => x_AGESS, 
                                                     "beta_samps_HS" => beta_samps_HS,
                                                     "beta_samps_half_t" => beta_samps_half_t,
