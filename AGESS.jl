@@ -146,7 +146,7 @@ function dMvN(x::AbstractVector{Y}, μ::AbstractVector{Y}, Σ_chol::LowerTriangu
               ph::AbstractVector{Y}) where {Y<:AbstractFloat}
     ph .= (x .- μ)
     ph .= ((Σ_chol) \ ph)
-    pdf::Float64 = dot(ph, ph)
+    pdf::Float64 = -0.5 * dot(ph, ph)
     return pdf
 end
 
@@ -275,6 +275,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
     Σ_ph =  LowerTriangular(diagm(ones(P)))
     μ_0 = zeros(P)
     ph_cholesky_update = ones(P)
+    w_const = max(2/3, ((cbrt(P) - 1) / cbrt(P)))
 
     for i in 2:n_MCMC
         if i == burnin_num
@@ -306,7 +307,7 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
         
         
         ## Adapt mean and covariance
-        w_i = i^(-1)
+        w_i = i^(-w_const)
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
         @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
@@ -558,7 +559,7 @@ function ARW(x::AbstractMatrix{Y}, log_likelihood::Function, log_prior::Function
         w_i = 1 / (i - half_warm_up_block)
         @views x_mean = (1 - w_i) * x_mean + w_i * x[i,:]
         Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- x_mean)
         lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
         Σ_rw .= (Σ_chol_adapt.L) .* scaling_Σ_I .* (2.38 / sqrt(P))
 

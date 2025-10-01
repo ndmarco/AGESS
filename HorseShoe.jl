@@ -59,7 +59,7 @@ function log_posterior(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::
   return lpdf
 end
 
-function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) where {Y<:AbstractFloat, T<:Integer}
+function gen_data_AR1(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) where {Y<:AbstractFloat, T<:Integer}
     Σ = ones(P, P) 
     for i in 1:P
       for j in 1:P
@@ -82,9 +82,9 @@ function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) wh
 end
 
 
-######################################
-############### P > N  ###############
-######################################
+####################################
+############### AR1  ###############
+####################################
 
 
 ### Low correlation
@@ -103,7 +103,7 @@ ESS_PS = zeros(10, 3)
 time_run = zeros(10, 3)
 
 for i in 1:10
-  X,Y, β = gen_data(N, P, ρ = 0.8, sparsity = 0.95, σ_sq = 1.0)
+  X,Y, β = gen_data_AR1(N, P, ρ = 0.8, sparsity = 0.95, σ_sq = 1.0)
   data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
   
   
@@ -122,17 +122,19 @@ for i in 1:10
   end
   
   ### AGESS
-  MCMC_iters = 200000
+  MCMC_iters = 500000
   x_AGESS = zeros(MCMC_iters, 2*P+2)
   Σ = diagm(ones(2*P+2))
   μ_AGESS = zeros(2*P+2)
   ph = zeros(N)
-  @time AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
+  t1 = time()
+  AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
         μ_AGESS, Σ, true, burnin = 0.5)
+  AGESS_total_time = time() - t1
   if i == 1
-    AGESS_β = plot(x_AGESS[100000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+    AGESS_β = plot(x_AGESS[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
-    AGESS_β_0 = plot(x_AGESS[100000:10:end, findall(β .== 0)], legend = false, dpi = 300)
+    AGESS_β_0 = plot(x_AGESS[1:10:end, findall(β .== 0)], legend = false, dpi = 300)
   end
   ### GESS
   if i == 1
@@ -142,9 +144,9 @@ for i in 1:10
                     μ_GESS, Σ)
     
     
-    GESS_β = plot(x_GESS[100000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+    GESS_β = plot(x_GESS[250000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
-    GESS_β_0 = plot(x_GESS[100000:10:end, findall(β .== 0)], legend = false, dpi = 300)
+    GESS_β_0 = plot(x_GESS[250000:10:end, findall(β .== 0)], legend = false, dpi = 300)
   end
   @rput X
   @rput Y
@@ -171,21 +173,17 @@ for i in 1:10
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
     HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false, dpi = 300)
   end
-  x_AGESS1 = x_AGESS[100001:end,1:P]
+  x_AGESS1 = x_AGESS[250001:end,1:P]
   x_stan1 = df[:,1:P]
   x_HS1 = beta_samps_HS[1:P,100001:end]'
   @rput x_AGESS1
   @rput x_HS1
   @rput x_stan1
   R"""
-  library(mcmcse)
-  mats = rbind(x_AGESS1, x_HS1, x_stan1)
-  sigma = mcse.multi(x_AGESS1)$cov
-  ess_AGESS <- multiESS(mats, covmat = sigma) / 3
-  sigma = mcse.multi(x_stan1)$cov
-  ess_Stan <- multiESS(mats, covmat = sigma) / 3
-  sigma = mcse.multi(x_HS1)$cov
-  ess_HS <- multiESS(mats, covmat = sigma) / 3
+  library(stableGR)
+  ess_AGESS <- n.eff(x_AGESS1)$n.eff
+  ess_Stan <- n.eff(x_stan1)$n.eff
+  ess_HS <- n.eff(x_HS1)$n.eff
   """
   @rget ess_Stan
   @rget ess_HS
@@ -194,8 +192,8 @@ for i in 1:10
   ESS_PS[i,1] = ess_AGESS / (AGESS_time[1])
   ESS_PS[i,2] = ess_Stan / (stan_time * (10/11))
   ESS_PS[i,3] = ess_HS / (HS_time * 0.5)
-  time_run[i,1] = AGESS_time[1]
-  time_run[i,2] = (stan_time * (10/11))
+  time_run[i,1] = AGESS_total_time
+  time_run[i,2] = (stan_time)
   time_run[i,3] = HS_time
 
   save(string(dir ,"//Sim", i,".jld2"), Dict("x_AGESS" => x_AGESS, 
@@ -203,6 +201,7 @@ for i in 1:10
                                              "x_HS" => beta_samps_HS,
                                              "stan_time" => stan_time,
                                              "AGESS_time" => AGESS_time[1],
+                                             "AGESS_total_Time" => AGESS_total_time,
                                              "HS_time" => HS_time,
                                              "ess_Stan" => ess_Stan,
                                              "ess_AGESS" => ess_AGESS,
@@ -217,12 +216,154 @@ time_run1[:,2] .= time_run[:,1]
 colors = [:green :orange :navy]
 box1 = boxplot(["AGESS" "HMC" "HS"], ESS_PS, title = "Effective Sample Size (P = 202)", legend = false, color=[:green :orange :navy], markerstrokewidth=0,  yscale=:log10)
 ylabel!("Effective Sample Size per Second")
-box2 = boxplot(["AGESS" "HMC" "HS"], time_run, title = "Computational Time", legend = false, yscale=:log10, yticks = [10, 100, 1000],  ylims = [10, 1000], markerstrokewidth=0, color=[:green :orange :navy])
+box2 = boxplot(["AGESS" "HMC" "HS"], time_run, title = "Computational Time", legend = false, yscale=:log10, yticks = [10, 100, 1000],  ylims = [10, 2000], markerstrokewidth=0, color=[:green :orange :navy])
 ylabel!("Seconds")
 
 plot(GESS_β, AGESS_β, Stan_β, HS_β, box1, GESS_β_0, AGESS_β_0, Stan_β_0, HS_β_0, box2, layout = @layout([A B C D E; F G H I J]), margin= 5Plots.mm)
 plot!(size = (2500, 1000))
 savefig(string(dir ,"//SimulationResults.pdf"))
+
+
+
+N = 50
+P = 100
+Stan_β = plot()
+Stan_β_0 = plot()
+AGESS_β = plot()
+AGESS_β_0 = plot()
+GESS_β = plot()
+GESS_β_0 = plot()
+HS_β = plot()
+HS_β_0 = plot()
+ESS_PS = zeros(10, 3)
+time_run = zeros(10, 3)
+
+function gen_data(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2, σ_sq::Y = 1.0) where {Y<:AbstractFloat, T<:Integer}
+    Σ = ones(P, P) .* ρ
+    Σ[diagind(Σ)] .= 1
+    X = zeros(N, P)
+    X .= rand(MultivariateNormal(zeros(P), Σ), N)'
+    β = zeros(P)
+    for i in 1:P
+        if rand(Bernoulli(1 - sparsity)) == 1
+          β[i] = (rand() * 3 + 1) * (-1)^i
+        end
+    end
+
+    Y_obs = rand(MultivariateNormal(X * β, σ_sq * diagm(ones(N))))
+
+    return X, Y_obs, β
+end
+
+for i in 1:10
+  X,Y, β =  gen_data_AR1(N, P, ρ = 0.8, sparsity = 0.85, σ_sq = 1.0)
+  data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
+  
+  
+  ### STAN
+  sm_HS = SampleModel("HorseShoe", model);
+  t1 = time()
+  rc = stan_sample(sm_HS; num_chains=1, num_warmups=10000, num_samples=100000, data);
+  stan_time = time() - t1
+  df = read_samples(sm_HS, :array);
+  df = df[:,:,1]
+  
+  if i == 1
+    Stan_β = plot(df[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+    hline!(β[findall(β .!= 0)], line = :dash, color =:black)
+    Stan_β_0 = plot(df[1:10:end, findall(β .== 0)], legend = false, dpi = 300)
+  end
+  
+  ### AGESS
+  MCMC_iters = 500000
+  x_AGESS = zeros(MCMC_iters, 2*P+2)
+  Σ = diagm(ones(2*P+2))
+  μ_AGESS = zeros(2*P+2)
+  ph = zeros(N)
+  t1 = time()
+  AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
+        μ_AGESS, Σ, true, burnin = 0.5)
+  AGESS_total_time = time() - t1
+  if i == 1
+    AGESS_β = plot(x_AGESS[250001:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+    hline!(β[findall(β .!= 0)], line = :dash, color =:black)
+    AGESS_β_0 = plot(x_AGESS[1:10:end, findall(β .== 0)], legend = false, dpi = 300)
+  end
+  ### GESS
+  if i == 1
+    x_GESS = zeros(MCMC_iters, 2*P+2)
+    μ_GESS = zeros(2*P+2)
+    GESS_time = GESS(x_GESS,  b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]),
+                    μ_GESS, Σ)
+    
+    
+    GESS_β = plot(x_GESS[250000:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+    hline!(β[findall(β .!= 0)], line = :dash, color =:black)
+    GESS_β_0 = plot(x_GESS[250000:10:end, findall(β .== 0)], legend = false, dpi = 300)
+  end
+  @rput X
+  @rput Y
+  R"""
+  
+  library(horseshoe)
+  
+  X_transpose <- t(X)
+  burnin <- 0
+  chain_length <- 200000
+  chain <- NA
+  time1 = Sys.time()
+  hs_chain <- horseshoe(Y, X, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+  #try(chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y, t_dist_df=2))
+  time_end = Sys.time() - time1
+  beta_samps_HS = hs_chain$BetaSamples
+  HS_time = time_end
+  
+  """
+  @rget beta_samps_HS
+  @rget HS_time
+  if i == 1
+    HS_β = plot(beta_samps_HS[findall(β .!= 0), 100000:10:end]', legend = false, dpi = 300)
+    hline!(β[findall(β .!= 0)], line = :dash, color =:black)
+    HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false, dpi = 300)
+  end
+  x_AGESS1 = x_AGESS[250001:end,1:P]
+  x_stan1 = df[:,1:P]
+  x_HS1 = beta_samps_HS[1:P,100001:end]'
+  @rput x_AGESS1
+  @rput x_HS1
+  @rput x_stan1
+  R"""
+  library(stableGR)
+  ess_AGESS <- n.eff(x_AGESS1)$n.eff
+  ess_Stan <- n.eff(x_stan1)$n.eff
+  ess_HS <- n.eff(x_HS1)$n.eff
+  """
+  @rget ess_Stan
+  @rget ess_HS
+  @rget ess_AGESS
+  
+  ESS_PS[i,1] = ess_AGESS / (AGESS_time[1])
+  ESS_PS[i,2] = ess_Stan / (stan_time * (10/11))
+  ESS_PS[i,3] = ess_HS / (HS_time * 0.5)
+  time_run[i,1] = AGESS_total_time
+  time_run[i,2] = (stan_time)
+  time_run[i,3] = HS_time
+
+  save(string(dir ,"//Sim", i,".jld2"), Dict("x_AGESS" => x_AGESS, 
+                                             "x_Stan" => df,
+                                             "x_HS" => beta_samps_HS,
+                                             "stan_time" => stan_time,
+                                             "AGESS_time" => AGESS_time[1],
+                                             "AGESS_total_Time" => AGESS_total_time,
+                                             "HS_time" => HS_time,
+                                             "ess_Stan" => ess_Stan,
+                                             "ess_AGESS" => ess_AGESS,
+                                             "ess_HS" => ess_HS,
+                                             "β" => β,
+                                             "X" => X,
+                                             "Y" => Y))
+end
+
 
 #######################
 ###### Real Data ######
@@ -392,8 +533,8 @@ for(i in 1:dim2){
 }
 corr <- abs(corr)
 ind <- order(corr)
-X_test <- X_test[,ind[(dim2-299):dim2]]
-X_train <- X_train[,ind[(dim2-299):dim2]]
+X_test <- X_test[,ind[(dim2-199):dim2]]
+X_train <- X_train[,ind[(dim2-199):dim2]]
 
 
 for(i in 1:ncol(X_train)){
@@ -443,3 +584,339 @@ sum(elppd_agess)
 sum(elppd_HS)
 RMSE_agess = RMSE(X_test, y_test, x_AGESS[100000:end,1:P])
 RMSE_HS = RMSE(X_test, y_test, beta_samps_HS[:,100000:end]')
+
+
+
+
+
+
+
+
+
+
+
+
+######################
+### Semi-Synthetic ###
+######################
+R"""
+library(hdi)
+library(glmnet)
+library(horseshoe)
+data(riboflavin)
+dim2 <- dim(riboflavin$x)[2]
+X <-  riboflavin$x
+y_obs <- riboflavin$y
+corr <- rep(0, dim2)
+for(i in 1:dim2){
+  corr[i] <- cor(y_sim, X[,i])
+}
+corr <- abs(corr)
+ind <- order(corr)
+X <- X[,ind[(dim2 - 199):dim2]]
+
+X <- scale(X)
+y_obs <- scale(y_obs)
+
+### fit lasso
+set.seed(123)
+lasso <- cv.glmnet(X, y_obs, alpha = 1, maxit = 10^6, intercept=FALSE)
+beta = coef(lasso, s = "lambda.1se")
+
+X_out <- X[, which(beta != 0) -1]
+y_sim <- as.vector(X_out %*% beta[which(beta != 0)])
+y_sim <- y_sim + rnorm(71, 0, sqrt(sum((y_sim - y_obs)^2) / 71))
+X_rest <- X[, -which(beta[2:length(beta)] != 0)]
+X <- cbind(X_out, X_rest)
+
+X_train <- X[1:50,]
+X_test <- X[51:71,]
+y_train <- y_sim[1:50]
+y_test <- y_sim[51:71]
+
+beta_nonzero =  beta[which(beta != 0)]
+"""
+
+@rget X_train
+@rget X_test
+@rget y_train
+@rget y_test
+@rget beta_nonzero
+
+
+function elppd(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}, σ_samples::AbstractVector{Y}) where {Y<:AbstractFloat}
+    lppd = zeros(length(Y_obs))
+    for i in 1:length(Y_obs)
+      for j in 1:size(β_samples)[1]
+        @views lppd[i] += pdf(Normal(dot(X[i,:], β_samples[j,:]), σ_samples[j]), Y_obs[i])
+      end
+      lppd[i] /= size(β_samples)[1]
+      lppd[i] = log(lppd[i])
+    end
+
+  return lppd
+end
+
+function RMSE(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}) where {Y<:AbstractFloat}
+  β = mean(β_samples, dims = 1)
+  Y_pred = X * β'
+  RMSE = sqrt(mean((Y_obs - Y_pred).^2))
+  
+  return RMSE
+end
+
+
+P = size(X_train)[2]
+MCMC_iters = 400000
+data = Dict("N" => 50, "P" => P, "X" => X_train, "y" => y_train)
+
+elppd_sim = zeros(10,3)
+RMSE_sim = zeros(10,3)
+time_sim = zeros(10, 3)
+
+for i in 1:10
+  R"""
+  # Run Horseshoe
+  burnin <- 0
+  chain_length <- 400000
+  hs_chain <- NULL
+  HS_time <- NULL
+  sigma_samps_HS <- NULL
+  time1 = Sys.time()
+  hs_chain <- horseshoe(y_train, X_train, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+  time_end = Sys.time() - time1
+  beta_samps_HS = hs_chain$BetaSamples
+  HS_time = time_end
+  sigma_samps_HS = hs_chain$Sigma2Samples
+  """
+  @rget beta_samps_HS
+  @rget sigma_samps_HS
+  @rget HS_time
+
+  ## STAN
+  sm_HS = SampleModel("HorseShoe", model);
+  t1 = time()
+  rc = stan_sample(sm_HS; num_chains=1, num_warmups=20000, num_samples=200000, data);
+  stan_time = time() - t1
+  df = read_samples(sm_HS, :array);
+  df = df[:,:,1]
+
+  x_AGESS = zeros(800000, 2*P+2)
+  Σ = diagm(ones(2*P+2))
+  μ_AGESS = zeros(2*P+2)
+  t1 = time()
+  AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X_train, y_train), 
+        μ_AGESS, Σ, true, burnin = 0.5)
+  AGESS_total_time = time() - t1
+
+  elppd_sim[i,1] = sum(elppd(X_test, y_test, x_AGESS[400000:end,1:P], exp.(x_AGESS[400000:end,2*P +2])))
+  elppd_sim[i,2] = sum(elppd(X_test, y_test, df[:,1:P], df[:,2*P + 2]))
+  if isnothing(beta_samps_HS) == false
+    elppd_sim[i,3] = sum(elppd(X_test, y_test, beta_samps_HS[:,200000:end]', sqrt.(sigma_samps_HS[200000:end])))
+  end
+
+  RMSE_sim[i,1] = RMSE(X_test, y_test, x_AGESS[400000:end,1:P])
+  RMSE_sim[i,2] = RMSE(X_test, y_test, df[:,1:P])
+  if isnothing(beta_samps_HS) == false
+    RMSE_sim[i,3] = RMSE(X_test, y_test, beta_samps_HS[:,200000:end]')
+  end
+  time_sim[i,1] = AGESS_total_time
+  time_sim[i,2] = stan_time
+  time_sim[i,3] = HS_time * 60
+end
+
+box_elppd = boxplot(["AGESS" "HMC" "HS"], elppd_sim, title = "ELPPD", legend = false,markerstrokewidth=0)
+ylabel!("ELPPD")
+
+
+box_RMSE = boxplot(["AGESS" "HMC" "HS"], RMSE_sim, title = "RMSE", legend = false,markerstrokewidth=0)
+ylabel!("RMSE")
+
+
+box_time =  boxplot(["AGESS" "HMC" "HS"], time_sim, title = "Total Computation Time", legend = false, yscale=:log10, yticks = [100, 1000, 10000, 100000], ylims = [100, 100000],markerstrokewidth=0)
+ylabel!("Time (Seconds)")
+
+
+
+plot(x_AGESS[100000:30:end, 1:length(beta_nonzero)], labels = false)
+
+plot(x_AGESS[100000:30:end, (1 + length(beta_nonzero)):P], labels = false)
+
+
+function elppd(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}, σ_samples::AbstractVector{Y}) where {Y<:AbstractFloat}
+    lppd = zeros(length(Y_obs))
+    for i in 1:length(Y_obs)
+      for j in 1:size(β_samples)[1]
+        @views lppd[i] += pdf(Normal(dot(X[i,:], β_samples[j,:]), σ_samples[j]), Y_obs[i])
+      end
+      lppd[i] /= size(β_samples)[1]
+      lppd[i] = log(lppd[i])
+    end
+
+  return lppd
+end
+
+function RMSE(X::AbstractMatrix{Y}, Y_obs::AbstractVector{Y}, β_samples::AbstractMatrix{Y}) where {Y<:AbstractFloat}
+  β = mean(β_samples, dims = 1)
+  Y_pred = X * β'
+  RMSE = sqrt(mean((Y_obs - Y_pred).^2))
+  
+  return RMSE
+end
+
+elppd_agess = elppd(X_test, y_test, x_AGESS[100000:end,1:P], exp.(x_AGESS[100000:end,2*P +2]))
+elppd_HS = elppd(X_test, y_test, beta_samps_HS[:,100000:end]', sqrt.(sigma_samps_HS[100000:end]))
+sum(elppd_HS)
+sum(elppd_agess)
+
+g1 = scatter(mean(beta_samps_HS[:,100000:end], dims = 2))
+scatter!(mean(x_AGESS[100000:end, 1:P], dims = 1)')
+scatter!(beta_nonzero)
+
+
+RMSE_agess = RMSE(X_test, y_test, x_AGESS[100000:end,1:P])
+RMSE_HS = RMSE(X_test, y_test, beta_samps_HS[:,100000:end]')
+
+
+
+
+
+
+R"""
+library(fds)
+library(glmnet)
+library(horseshoe)
+data(labc)
+y_pred = labc[1,]
+data(labp)
+y_obs = labp[1,]
+y_pred = y_pred - mean(y_obs)
+y_obs = y_obs - mean(y_obs)
+data(nirp)
+data(nirc)
+X = t(nirp$y)
+X_pred = t(nirc$y)
+
+X <- rbind(X, X_pred)
+y_obs <- c(y_obs, y_pred)
+X <- scale(X)
+y_obs <- scale(y_obs)
+
+### fit lasso
+set.seed(123)
+lasso <- cv.glmnet(X, y_obs, alpha = 1,type.measure = "mse", maxit = 10^6, intercept=FALSE)
+beta = coef(lasso, s = "lambda.1se")
+
+X_out <- X[, which(beta != 0) -1]
+y_sim <-  as.vector(X_out %*% beta[which(beta != 0)])
+y_sim <- y_sim + rnorm(72, 0, sqrt(sum((y_sim - y_obs)^2) / 72))
+X_rest <- X[, -which(beta[2:length(beta)] != 0)]
+
+X <- cbind(X_out, X_rest)
+
+X_train <- X[1:32,]
+X_test <- X[33:72,]
+y_train <- y_sim[1:32]
+y_test <- y_sim[33:72]
+
+
+# Run Horseshoe
+burnin <- 0
+chain_length <- 400000
+chain <- NA
+time1 = Sys.time()
+hs_chain <- horseshoe(y_train, X_train, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+time_end = Sys.time() - time1
+beta_samps_HS = hs_chain$BetaSamples
+HS_time = time_end
+sigma_samps_HS = hs_chain$Sigma2Samples
+beta_nonzero =  beta[which(beta != 0)]
+"""
+@rget X_train
+@rget X_test
+@rget y_train
+@rget y_test
+@rget beta_nonzero
+
+P = size(X_train)[2]
+MCMC_iters = 400000
+data = Dict("N" => 32, "P" => P, "X" => X_train, "y" => y_train)
+
+elppd_sim = zeros(10,3)
+RMSE_sim = zeros(10,3)
+time_sim = zeros(10, 3)
+for i in 5:10
+  R"""
+  # Run Horseshoe
+  burnin <- 0
+  chain_length <- 400000
+  hs_chain <- NULL
+  HS_time <- NULL
+  sigma_samps_HS <- NULL
+
+  time1 = Sys.time()
+  hs_chain <- horseshoe(y_train, X_train, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+  time_end = Sys.time() - time1
+  beta_samps_HS = hs_chain$BetaSamples
+  HS_time = time_end
+  sigma_samps_HS = hs_chain$Sigma2Samples
+  """
+  @rget beta_samps_HS
+  @rget sigma_samps_HS
+  @rget HS_time
+
+
+  ## STAN
+  sm_HS = SampleModel("HorseShoe", model);
+  t1 = time()
+  rc = stan_sample(sm_HS; num_chains=1, num_warmups=20000, num_samples=200000, data);
+  stan_time = time() - t1
+  df = read_samples(sm_HS, :array);
+  df = df[:,:,1]
+
+  x_AGESS = zeros(500000, 2*P+2)
+  Σ = diagm(ones(2*P+2))
+  μ_AGESS = zeros(2*P+2)
+  t1 = time()
+  AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X_train, y_train), 
+        μ_AGESS, Σ, true, burnin = 0.5)
+  AGESS_total_time = time() - t1
+
+  elppd_sim[i,1] = sum(elppd(X_test, y_test, x_AGESS[200000:end,1:P], exp.(x_AGESS[200000:end,2*P +2])))
+  elppd_sim[i,2] = sum(elppd(X_test, y_test, df[:,1:P], df[:,2*P + 2]))
+  elppd_sim[i,3] = sum(elppd(X_test, y_test, beta_samps_HS[:,200000:end]', sqrt.(sigma_samps_HS[200000:end])))
+
+  RMSE_sim[i,1] = RMSE(X_test, y_test, x_AGESS[200000:end,1:P])
+  RMSE_sim[i,2] = RMSE(X_test, y_test, df[:,1:P])
+  RMSE_sim[i,3] = RMSE(X_test, y_test, beta_samps_HS[:,200000:end]')
+
+  time_sim[i,1] = AGESS_total_time
+  time_sim[i,2] = stan_time
+  time_sim[i,3] = HS_time * 60
+end
+
+P = size(X_train)[2]
+MCMC_iters = 400000
+x_AGESS = zeros(MCMC_iters, 2*P+2)
+Σ = diagm(ones(2*P+2))
+μ_AGESS = zeros(2*P+2)
+t1 = time()
+AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], X_train, y_train), 
+      μ_AGESS, Σ, true, burnin = 0.5)
+AGESS_total_time = time() - t1
+
+plot(beta_samps_HS[1:length(beta_nonzero), 100000:30:end]', labels = false)
+plot(beta_samps_HS[(length(beta_nonzero)+1):end, 100000:30:end]', labels = false)
+
+
+plot(x_AGESS[100000:30:end, 1:length(beta_nonzero)], labels = false)
+
+plot(x_AGESS[100000:30:end, (1 + length(beta_nonzero)):P], labels = false)
+
+elppd_agess = elppd(X_test, y_test, x_AGESS[300000:end,1:P], exp.(x_AGESS[300000:end,2*P +2]))
+elppd_HS = elppd(X_test, y_test, beta_samps_HS[:,100000:end]', sqrt.(sigma_samps_HS[100000:end]))
+sum(elppd_HS)
+sum(elppd_agess)
+
+RMSE_agess = RMSE(X_test, y_test, x_AGESS[100000:end,1:P])
+RMSE_HS = RMSE(X_test, y_test, beta_samps_HS[:,300000:end]')

@@ -123,16 +123,11 @@ for j in 1:3
             @rput beta_samp_ARW_1
 
             R"""
-            library(mcmcse)
-            mats = rbind(beta_samp_ESS_1, beta_samp_AGESS_1, beta_samp_GESS_1, beta_samp_ARW_1)
-            sigma = mcse.multi(beta_samp_ESS_1)$cov
-            ess_ESS <- multiESS(mats, covmat = sigma) / 4
-            sigma = mcse.multi(beta_samp_GESS_1)$cov
-            ess_GESS <- multiESS(mats, covmat = sigma) / 4
-            sigma = mcse.multi(beta_samp_AGESS_1)$cov
-            ess_AGESS <- multiESS(mats, covmat = sigma) / 4
-            sigma = mcse.multi(beta_samp_ARW_1)$cov
-            ess_ARW <- multiESS(mats, covmat = sigma) / 4
+            library(stableGR)
+            ess_ESS <- n.eff(beta_samp_ESS_1)$n.eff
+            ess_GESS <- n.eff(beta_samp_GESS_1)$n.eff
+            ess_AGESS <- n.eff(beta_samp_AGESS_1)$n.eff
+            ess_ARW <- n.eff(beta_samp_ARW_1)$n.eff
             """
 
             @rget ess_ESS

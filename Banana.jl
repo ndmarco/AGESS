@@ -126,7 +126,7 @@ for i in 1:100
     Integral = trapz((x_grid,y_grid), exp.(M))
 
     if i == 1
-      p_density = heatmap(x_grid, y_grid, exp.(M .- log(Integral))', legend = :none, cgrad=(scale=:log10))
+      p_density = contour(x_grid, y_grid, exp.(M .- log(Integral))', legend = :none)
     end
     
     B = kde(x_AGESS1)
@@ -177,15 +177,10 @@ for i in 1:100
     KL_dist_banana[i, 5] = KL_ARW
 
     R"""
-    library(mcmcse)
-    mats = rbind(x_ESS1, x_GESS1, x_AGESS1)
-    sigma = mcse.multi(x_ESS1)$cov
-    ess_ESS <- multiESS(mats, covmat = sigma) / 3
-    multiESS(x_ESS1)
-    sigma = mcse.multi(x_GESS1)$cov
-    ess_GESS <- multiESS(mats, covmat = sigma) / 3
-    sigma = mcse.multi(x_AGESS1)$cov
-    ess_AGESS <- multiESS(mats, covmat = sigma) / 3
+    library(stableGR)
+    ess_ESS <- n.eff(x_ESS1)$n.eff
+    ess_GESS <- n.eff(x_GESS1)$n.eff
+    ess_AGESS <- n.eff(x_AGESS1)$n.eff
     """
     
     @rget ess_ESS
@@ -346,7 +341,7 @@ for i in 1:100
       M = [(logpdf(MvNormal((0.1 * (x - μ1)^2  -  0.5 * (y - μ2)^4 - 10 * (x- μ1) * (y- μ2)) * ones_N, 100 * Σ_I), data["y"]) + logpdf(Normal(0, 2), x) + logpdf(Normal(0, 2), y)) for x = x_grid, y = y_grid]
       Integral = trapz((x_grid,y_grid), exp.(M))
 
-      p_density = heatmap(x_grid, y_grid, exp.(M .- log(Integral))', legend = :none, cgrad=(scale=:log10))
+      p_density = contour(x_grid, y_grid, exp.(M .- log(Integral))', legend = :none)
       p1 = scatter(x_ESS[250001:end, 1], x_ESS[250001:end, 2], alpha = 0.4, color = colors[1], legend = false, ylim = (y_min, y_max), xlim = (x_min, x_max), markerstrokewidth=0)
       p2 = scatter(x_GESS[250001:end, 1], x_GESS[250001:end, 2], alpha = 0.4, color = colors[2], legend = false,ylim = (y_min, y_max), xlim = (x_min, x_max), markerstrokewidth=0)
       p3 = scatter(x_AGESS[250001:end, 1], x_AGESS[250001:end, 2], alpha = 0.4, color = colors[3], legend = false, ylim = (y_min, y_max), xlim = (x_min, x_max), markerstrokewidth=0)
@@ -406,16 +401,10 @@ for i in 1:100
     @rput x_ESS1
 
     R"""
-    library(mcmcse)
-    mats = rbind(x_ESS1, x_GESS1, x_AGESS1)
-    sigma = mcse.multi(x_ESS1)$cov
-    ess_ESS <- multiESS(mats, covmat = sigma) / 3
-    multiESS(x_ESS1)
-    sigma = mcse.multi(x_GESS1)$cov
-    ess_GESS <- multiESS(mats, covmat = sigma) / 3
-    sigma = mcse.multi(x_AGESS1)$cov
-    ess_AGESS <- multiESS(mats, covmat = sigma) / 3
-    sigma = mcse.multi(x_ARW1)$cov
+    library(stableGR)
+    ess_ESS <- n.eff(x_ESS1)$n.eff
+    ess_GESS <- n.eff(x_GESS1)$n.eff
+    ess_AGESS <- n.eff(x_AGESS1)$n.eff
     """
 
     @rget ess_ESS
@@ -456,7 +445,7 @@ for i in 1:100
   end
 end
 
-p6 = boxplot(["ESS" "GESS" "AGESS"], ESS_per_second_twin_bananas, markerstrokewidth=0, color=[:red :blue :green], legend = false, ylim = (0,300))
+p6 = boxplot(["ESS" "GESS" "AGESS"], ESS_per_second_twin_bananas, markerstrokewidth=0, color=[:red :blue :green], legend = false, ylim = (0,50))
 ylabel!("Effective Sample Size per Second")
 relative_KL = zeros(100,2)
 relative_KL[:,1:2] .= KL_dist_twin_banana[:,1:2]

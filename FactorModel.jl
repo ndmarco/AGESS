@@ -62,8 +62,8 @@ function transform_posterior(Λ::AbstractVector{Y}, η::AbstractVector{Y}, Y_obs
 end
 
 K = 6
-N = 1000
-P = 500
+N = 200
+P = 200
 N_MCMC = 100000
 
 a_1 = 2.0
@@ -100,7 +100,7 @@ AGESS_time1 = AGESS(x_AGESS1, b -> transform_posterior(b[1:K*P], b[(K*P + 1):(N*
                                                       b[(N*K + K*P + P + 1):(N*K + 2*K*P + P)], 
                                                       b[(N*K + 2*K*P + P + 1):(N*K + 2*K*P + P + K)],
                                                       τ_ph, a_1, a_2, ν, N, P, K, Σ_ph, ph), 
-                    μ_AGESS, Σ, true, burnin = 0.5)
+                    μ_AGESS, Σ, true, burnin = 0.5, single_step_prop = 0.0)
 b = x_AGESS[1,:]
 
 
