@@ -1,12 +1,12 @@
 using StanBase
-#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
+set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
+#set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity
 
-#dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Horseshoe"
+dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
+#dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Horseshoe"
 model = "
 data {
   int N;
@@ -132,10 +132,11 @@ for i in 1:10
         μ_AGESS, Σ, true, burnin = 0.5)
   AGESS_total_time = time() - t1
   if i == 1
-    AGESS_β = plot(x_AGESS[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
+    AGESS_β = plot(x_AGESS[250001:10:end, findall(β .!= 0)], legend = false, dpi = 300)
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
-    AGESS_β_0 = plot(x_AGESS[1:10:end, findall(β .== 0)], legend = false, dpi = 300)
+    AGESS_β_0 = plot(x_AGESS[250001:10:end, findall(β .== 0)], legend = false, dpi = 300)
   end
+
   ### GESS
   if i == 1
     x_GESS = zeros(MCMC_iters, 2*P+2)
@@ -151,31 +152,26 @@ for i in 1:10
   @rput X
   @rput Y
   R"""
-  
-  library(horseshoe)
-  
-  X_transpose <- t(X)
-  burnin <- 0
-  chain_length <- 200000
-  chain <- NA
+  library(bayesreg)
+  df1 <- data.frame(X,Y)
   time1 = Sys.time()
-  hs_chain <- horseshoe(Y, X, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
-  #try(chain <- half_t_mcmc(chain_length, burnin, X, X_transpose, y, t_dist_df=2))
+  hs_chain <- bayesreg(Y~., data=df1, prior="hs", burnin=1e5, n.samples=1e5, n.cores = 1)
   time_end = Sys.time() - time1
-  beta_samps_HS = hs_chain$BetaSamples
+
+  beta_samps_HS <- hs_chain$beta
   HS_time = time_end
-  
   """
+
   @rget beta_samps_HS
   @rget HS_time
   if i == 1
-    HS_β = plot(beta_samps_HS[findall(β .!= 0), 100000:10:end]', legend = false, dpi = 300)
+    HS_β = plot(beta_samps_HS[findall(β .!= 0), 1:10:end]', legend = false, dpi = 300)
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
-    HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 100000:10:end]', legend = false, dpi = 300)
+    HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 1:10:end]', legend = false, dpi = 300)
   end
   x_AGESS1 = x_AGESS[250001:end,1:P]
   x_stan1 = df[:,1:P]
-  x_HS1 = beta_samps_HS[1:P,100001:end]'
+  x_HS1 = beta_samps_HS'
   @rput x_AGESS1
   @rput x_HS1
   @rput x_stan1
@@ -191,7 +187,7 @@ for i in 1:10
   
   ESS_PS[i,1] = ess_AGESS / (AGESS_time[1])
   ESS_PS[i,2] = ess_Stan / (stan_time * (10/11))
-  ESS_PS[i,3] = ess_HS / (HS_time * 0.5)
+  ESS_PS[i,3] = ess_HS / (HS_time * 0.5 * 60)
   time_run[i,1] = AGESS_total_time
   time_run[i,2] = (stan_time)
   time_run[i,3] = HS_time
@@ -676,18 +672,15 @@ time_sim = zeros(10, 3)
 
 for i in 1:10
   R"""
-  # Run Horseshoe
-  burnin <- 0
-  chain_length <- 400000
-  hs_chain <- NULL
-  HS_time <- NULL
-  sigma_samps_HS <- NULL
+  library(bayesreg)
+  df1 <- data.frame(X_train,y_train)
   time1 = Sys.time()
-  hs_chain <- horseshoe(y_train, X_train, method.tau = "halfCauchy", method.sigma = "Jeffreys", nmc = chain_length, burn = 0)
+  hs_chain <- bayesreg(y_train~., data=df1, prior="hs", burnin=2e5, n.samples=2e5, n.cores = 1)
   time_end = Sys.time() - time1
-  beta_samps_HS = hs_chain$BetaSamples
-  HS_time = time_end
-  sigma_samps_HS = hs_chain$Sigma2Samples
+
+  beta_samps_HS <- hs_chain$beta
+  sigma_samps_HS <- hs_chain$sigma2
+  HS_time <- time_end
   """
   @rget beta_samps_HS
   @rget sigma_samps_HS
@@ -712,13 +705,13 @@ for i in 1:10
   elppd_sim[i,1] = sum(elppd(X_test, y_test, x_AGESS[400000:end,1:P], exp.(x_AGESS[400000:end,2*P +2])))
   elppd_sim[i,2] = sum(elppd(X_test, y_test, df[:,1:P], df[:,2*P + 2]))
   if isnothing(beta_samps_HS) == false
-    elppd_sim[i,3] = sum(elppd(X_test, y_test, beta_samps_HS[:,200000:end]', sqrt.(sigma_samps_HS[200000:end])))
+    elppd_sim[i,3] = sum(elppd(X_test, y_test, beta_samps_HS', sqrt.(sigma_samps_HS)))
   end
 
   RMSE_sim[i,1] = RMSE(X_test, y_test, x_AGESS[400000:end,1:P])
   RMSE_sim[i,2] = RMSE(X_test, y_test, df[:,1:P])
   if isnothing(beta_samps_HS) == false
-    RMSE_sim[i,3] = RMSE(X_test, y_test, beta_samps_HS[:,200000:end]')
+    RMSE_sim[i,3] = RMSE(X_test, y_test, beta_samps_HS')
   end
   time_sim[i,1] = AGESS_total_time
   time_sim[i,2] = stan_time
@@ -733,7 +726,7 @@ box_RMSE = boxplot(["AGESS" "HMC" "HS"], RMSE_sim, title = "RMSE", legend = fals
 ylabel!("RMSE")
 
 
-box_time =  boxplot(["AGESS" "HMC" "HS"], time_sim, title = "Total Computation Time", legend = false, yscale=:log10, yticks = [100, 1000, 10000, 100000], ylims = [100, 100000],markerstrokewidth=0)
+box_time =  boxplot(["AGESS" "HMC" "HS"], time_sim, title = "Total Computation Time", legend = false, yscale=:log10, yticks = [100, 1000, 10000], ylims = [100, 10000],markerstrokewidth=0)
 ylabel!("Time (Seconds)")
 
 
@@ -920,3 +913,99 @@ sum(elppd_agess)
 
 RMSE_agess = RMSE(X_test, y_test, x_AGESS[100000:end,1:P])
 RMSE_HS = RMSE(X_test, y_test, beta_samps_HS[:,300000:end]')
+
+
+
+##########################
+##### Logistic Case ######
+##########################
+
+function prior_β(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, σ::Y)::Float64 where {Y<:AbstractFloat}
+  lpdf::Float64 = 0.0
+  for i in eachindex(β)
+      @views lpdf += logpdf(Normal(0.0, exp(σ) * exp(τ) * exp(λ[i])), β[i])
+  end
+  return lpdf
+end
+
+function prior_λ(λ::AbstractVector{Y})::Float64 where {Y<:AbstractFloat}
+  lpdf::Float64 = 0.0
+  cauchy_d = Cauchy(0.0,1.0)
+  for i in eachindex(λ)
+      @views lpdf += logpdf(cauchy_d, exp(λ[i])) + λ[i]
+  end
+  return lpdf
+end
+
+
+function log_posterior_Logistic(β::AbstractVector{Y}, τ::Y, λ::AbstractVector{Y}, X::AbstractMatrix{Y}, y::AbstractVector{T})::Float64 where {Y<:AbstractFloat, T<:Integer}
+  lpdf::Float64 = 0.0
+  ## Likelihood
+  for i in eachindex(y)
+    @views lpdf -= log1p(exp(-(sign(y[i] - 0.5) * dot(X[i,:], β))))
+  end
+  ## Prior 
+  lpdf += prior_β(β, τ, λ, 0.0) + prior_λ(λ) + logpdf(Cauchy(0,1), exp(τ)) + τ
+
+  return lpdf
+end
+
+function gen_data_Logistic(N::T, P::T; sparsity::Y = 0.8, ρ::Y = 0.2) where {Y<:AbstractFloat, T<:Integer}
+    Σ = ones(P, P) 
+    for i in 1:P
+      for j in 1:P
+        Σ[i,j] = ρ^(abs(i - j))
+      end
+    end
+    X = zeros(N, P)
+    X .= rand(MultivariateNormal(zeros(P), Σ), N)'
+    β = zeros(P)
+    for i in 1:P
+      if rand(Bernoulli(1 - sparsity)) == 1
+        β[i] = (rand() * 3 + 1) * (-1)^i
+      end
+    end
+
+    Y_obs = zeros(Integer, N)
+    for i in 1:N
+      Y_obs[i] = rand(Bernoulli((1 / (1 + exp(-dot(X[i,:], β))))))
+    end
+
+    return X, Y_obs, β
+end
+
+N = 200
+P = 50
+
+X, Y, β = gen_data_Logistic(N, P, ρ = 0.8, sparsity = 0.90)
+data = Dict("N" => N, "P" => P, "X" => X, "y" => Y)
+
+MCMC_iters = 200000
+x_AGESS = zeros(MCMC_iters, 2*P+1)
+Σ = diagm(ones(2*P+1))
+μ_AGESS = zeros(2*P+1)
+AGESS_time = AGESS(x_AGESS, b -> log_posterior_Logistic(b[1:P], b[2*P+1], b[(P+1):(2*P)], data["X"], data["y"]), 
+      μ_AGESS, Σ, true)
+
+AGESS_β_HC = plot(x_AGESS[100000:10:end, findall(β .!= 0)], legend = false)
+hline!(β[findall(β .!= 0)], line = :dash, color =:black)
+AGESS_β_0_HC = plot(x_AGESS[100000:10:end, findall(β .== 0)], legend = false)
+
+
+@rput X
+@rput Y
+R"""
+library(bayesreg)
+Y <- as.factor(Y)
+df1 <- data.frame(X,Y)
+time1 = Sys.time()
+rv.log <- bayesreg(Y~., data=df1, model = "logistic", prior="hs", burnin=1e5, n.samples=1e5, n.cores = 1)
+time_end = Sys.time() - time1
+
+beta_samples <- rv.log$beta
+"""
+
+@rget beta_samples
+br_β_HC = plot(beta_samples[findall(β .!= 0), 1:10:end]', legend = false)
+hline!(β[findall(β .!= 0)], line = :dash, color =:black)
+br_β_0_HC = plot(beta_samples[findall(β .== 0), 1:10:end]', legend = false)
