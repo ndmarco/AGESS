@@ -346,6 +346,124 @@ function AGESS(x::AbstractMatrix{Y}, log_posterior::Function,
     return time() - t1, Σ_chol_adapt.L * Σ_chol_adapt.U, μ_adapt
 end
 
+function AGESS1(x::AbstractMatrix{Y}, log_posterior::Function, 
+                μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
+                t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1, 
+                single_step_prop::Y = 0.05, β::Y = 0.5) where {Y<:AbstractFloat}
+    P = size(x)[2]
+    n_MCMC = size(x)[1]
+    z = zeros(P)
+    burnin_num = floor(Int64, burnin * n_MCMC)
+    t1 = time()
+
+    μ_adapt = copy(μ)
+    μ_adapt_ph = copy(μ)
+    ph = similar(μ_adapt)
+
+    Σ_chol = cholesky(Σ)
+    Σ_chol_adapt = deepcopy(Σ_chol)
+    Σ_chol_adapt_ph = deepcopy(Σ_chol)
+
+    Σ_ph =  LowerTriangular(diagm(ones(P)))
+    μ_0 = zeros(P)
+    ph_cholesky_update = ones(P)
+    w_const = max(2/3, ((cbrt(P) - 1) / cbrt(P)))
+    N_J = 2
+    n_j = 2
+
+    for i in 2:n_MCMC
+        if i == burnin_num
+            t1 = time()
+        end
+
+        if P >= 10
+            if i < burnin_num * single_step_prop
+                AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
+            else
+                if rand() > ϵ
+                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
+                                        Σ_chol_adapt.L, i)
+                elseif rand() > 0.5
+                    AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
+                else
+                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
+                end
+            end
+        else
+            if rand() > ϵ
+                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
+                                        Σ_chol_adapt.L, i)
+            else
+                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
+            end
+
+        end
+        
+        w_i = i^(-w_const)
+        Σ_chol_adapt_ph.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt_ph.U
+        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt_ph)
+        lowrankupdate!(Σ_chol_adapt_ph, ph_cholesky_update)
+        @views μ_adapt_ph .= (1 - w_i) * μ_adapt_ph +  w_i * x[i,:]
+        
+        ## Adapt mean and covariance
+        if i == N_J
+            Σ_chol_adapt.U .= Σ_chol_adapt_ph.U
+            μ_adapt .= μ_adapt_ph
+            n_j += 1
+            N_J += floor(n_j^β)
+        end
+
+        ## Populate next value in Markov Chain
+        if i < n_MCMC
+            @views x[i+1,:] .= x[i,:]
+        end
+
+        # Update User
+        if P >= 10
+            if i < burnin_num * single_step_prop
+                if (i % 25) == 0
+                    println("MCMC iter: ", i)
+                    @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
+                    println("Log Posterior: ", log_lik)
+                end
+            else
+                if (i % 1000) == 0
+                    println("MCMC iter: ", i)
+                    @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
+                    println("Log Posterior: ", log_lik)
+                end
+            end
+        else
+            if (i % 1000) == 0
+                println("MCMC iter: ", i)
+                @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
+                println("Log Posterior: ", log_lik)
+            end
+        end
+        
+    end
+
+    return time() - t1, Σ_chol_adapt.L * Σ_chol_adapt.U, μ_adapt
+end
+
+function mean_in_place(ph::AbstractVector{Y}, data::AbstractMatrix{Y}) where {Y<:AbstractFloat}
+    for i in 1:length(ph)
+        @views ph[i] = mean(data[:,i])
+    end
+    
+    return nothing
+end
+
+function cov_in_place(ph::AbstractMatrix{Y}, data::AbstractMatrix{Y}, μ::AbstractVector{Y}) where {Y<:AbstractFloat}
+    ph .= 0
+    data .-= μ'
+    mul!(ph, data', data)
+    ph ./= (size(data)[1] - 1)
+    data .+= μ'
+
+    return nothing
+end
+
 function AGESS_SingleStep_1d(x::AbstractMatrix{Y}, log_posterior::Function, 
                              t_dist::Bool, ν::Y, μ_adapt::AbstractVector{Y}, Σ_chol_adapt::LowerTriangular{Y, <:AbstractMatrix{Y}}, i::T) where {Y<:AbstractFloat, T<:Integer}
 

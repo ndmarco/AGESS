@@ -131,11 +131,11 @@ for i in 1:25
   μ_AGESS = zeros(2*P+2)
   ph = zeros(N)
   t1 = time()
-  AGESS_time = AGESS(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
+  AGESS_time = AGESS1(x_AGESS, b -> log_posterior(b[1:P], b[2*P+1], b[(P+1):(2*P)], b[2*P+2], data["X"], data["y"]), 
         μ_AGESS, Σ, true, burnin = 0.5)
   AGESS_total_time = time() - t1
   if i == 1
-    AGESS_β = plot(x_AGESS[250001:10:end, findall(β .!= 0)], legend = false, dpi = 300, ylims=[-2.5,4.5])
+    AGESS_β = plot(x_AGESS[1:10:end, findall(β .!= 0)], legend = false, dpi = 300)
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
     AGESS_β_0 = plot(x_AGESS[250001:10:end, findall(β .== 0)], legend = false, dpi = 300, ylims = [-1.5, 1.5])
   end
@@ -169,7 +169,7 @@ for i in 1:25
   @rget beta_samps_HS
   @rget HS_time
   if i == 1
-    HS_β = plot(beta_samps_HS[findall(β .!= 0), 1:10:end]', legend = false, dpi = 300, ylims=[-2.5,4.5])
+    HS_β = plot(beta_samps_HS[findall(β .!= 0), 1:10:end]', legend = false, dpi = 300)
     hline!(β[findall(β .!= 0)], line = :dash, color =:black)
     HS_β_0 = plot(beta_samps_HS[findall(β .== 0), 1:10:end]', legend = false, dpi = 300, ylims = [-1.5, 1.5])
   end
