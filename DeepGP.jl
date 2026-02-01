@@ -6,7 +6,7 @@ using StanSample, DataFrames, Stan
 include("AGESS.jl")
 
 #dir = "/Users/ndm34/Projects/AGESS_Simulation/DeepGp"
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\DeepGP1"
+dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\DeepGP"
 
 
 function gen_data(N::T, min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:Integer}
@@ -427,7 +427,7 @@ for i in 1:10
     ph2 = ones(N_obs)
     Σ2 = diagm(ones(N_obs))
     t1 = time()
-    AGESS_time, Σ_adapt, μ_adapt = AGESS1(W_AGESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
+    AGESS_time, Σ_adapt, μ_adapt = AGESS(W_AGESS, b -> (likelihood_Y(b[1:N_obs], X_N, Y_N, g, exp(b[N_obs+1]), exp(b[N_obs+2]), ph1, Σ1, ν_y) + 
                                             likelihood_W(b[1:N_obs], X_N, exp(b[N_obs+3]), g_x, ph2, Σ2) + logpdf(Gamma(1.0,2.0), exp(b[N_obs+1])) + 
                                             b[N_obs+1] + logpdf(Gamma(1.0,2.0), exp(b[N_obs+2])) + b[N_obs+2] + logpdf(Gamma(1.0,2.0), exp(b[N_obs+3])) + b[N_obs+3]), μ_0, Σ_0, true)
     total_AGESS_time = time() -t1
@@ -448,10 +448,10 @@ for i in 1:10
         p3 = plot_CI(Y_N, X_N, Y_pred_Stan, time_points, truth)
     end
     for j in 1:498
-       #sd_Y_pred[1, i, j] = sqrt(var(Y_pred_ESS[:,j]))
-       #sd_Y_pred[2, i, j] = sqrt(var(Y_pred_GESS[:,j]))
+       sd_Y_pred[1, i, j] = sqrt(var(Y_pred_ESS[:,j]))
+       sd_Y_pred[2, i, j] = sqrt(var(Y_pred_GESS[:,j]))
        sd_Y_pred[3, i, j] = sqrt(var(Y_pred_AGESS[:,j]))
-       #sd_Y_pred[4, i, j] = sqrt(var(Y_pred_Stan[:,j]))
+       sd_Y_pred[4, i, j] = sqrt(var(Y_pred_Stan[:,j]))
     end
 
     @rput df_AGESS

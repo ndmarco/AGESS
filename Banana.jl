@@ -445,7 +445,7 @@ for i in 1:100
   end
 end
 
-p6 = boxplot(["ESS" "GESS" "AGESS"], ESS_per_second_twin_bananas, markerstrokewidth=0, color=[:red :blue :green], legend = false, ylim = (0,50))
+p6 = boxplot(["ESS" "GESS" "AGESS"], ESS_per_second_twin_bananas, markerstrokewidth=0, color=[:red :blue :green], legend = false)
 ylabel!("Effective Sample Size per Second")
 relative_KL = zeros(100,2)
 relative_KL[:,1:2] .= KL_dist_twin_banana[:,1:2]

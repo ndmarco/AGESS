@@ -85,38 +85,39 @@ for j in 1:3
             sum(μ .== 0)
 
             ## Elliptical Slice Sampling
-            β_samp_ESS = zeros(5000 * P_vec[j], P_vec[j])
+            β_samp_ESS = zeros(10000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_ESS = ESS(β_samp_ESS, β -> log_likelihood(β, x, y), μ_j, Σ)
+            time_non_burnin_ESS = ESS(β_samp_ESS, β -> log_likelihood(β, x, y), μ_j, Σ, burnin = 0.25)
             total_time_ESS = time() - t2
             
 
             ## Generalized Elliptical Slice Sampling
-            β_samp_GESS = zeros(5000 * P_vec[j], P_vec[j])
+            β_samp_GESS = zeros(10000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_GESS = GESS(β_samp_GESS,  β -> log_posterior(β, x, y), μ_j, Σ)
+            time_non_burnin_GESS = GESS(β_samp_GESS,  β -> log_posterior(β, x, y), μ_j, Σ, burnin = 0.25)
             total_time_GESS = time() - t2
 
 
             ## Adaptive Generalized Elliptical Slice Sampling
-            β_samp_AGESS = zeros(5000 * P_vec[j], P_vec[j])
+            β_samp_AGESS = zeros(10000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_AGESS, Σ_adapt = AGESS(β_samp_AGESS, β -> log_posterior(β, x, y), μ_j, Σ, true)
+            time_non_burnin_AGESS, Σ_adapt = AGESS(β_samp_AGESS, β -> log_posterior(β, x, y), μ_j, Σ, true, burnin = 0.25)
             total_time_AGESS = time() - t2
             
 
             ## Adaptive Random Walk
-            β_samp_ARW = zeros(5000 * P_vec[j], P_vec[j])
+            β_samp_ARW = zeros(30000 * P_vec[j], P_vec[j])
             t2 = time()
-            time_non_burnin_ARW = ARW(β_samp_ARW, β -> log_likelihood(β, x, y), log_prior, 1000, 0.01, μ_j, Σ)
+            time_non_burnin_ARW = ARW(β_samp_ARW, β -> log_likelihood(β, x, y), log_prior, 10000, 0.01, μ_j, Σ, burnin = 25/300)
             total_time_ARW = time() - t2
             
 
             ## Get Multivariate Effective Sample Size using R package "stableGR"
-            beta_samp_ESS_1 = β_samp_ESS[2500*P_vec[j]:5000*P_vec[j],:]
-            beta_samp_GESS_1 = β_samp_GESS[2500*P_vec[j]:5000*P_vec[j],:]
-            beta_samp_AGESS_1 = β_samp_AGESS[2500*P_vec[j]:5000*P_vec[j],:]
-            beta_samp_ARW_1 = β_samp_ARW[2500*P_vec[j]:5000*P_vec[j],:]
+            beta_samp_ESS_1 = β_samp_ESS[2500*P_vec[j]:10000*P_vec[j],:]
+            beta_samp_GESS_1 = β_samp_GESS[2500*P_vec[j]:10000*P_vec[j],:]
+            beta_samp_AGESS_1 = β_samp_AGESS[2500*P_vec[j]:10000*P_vec[j],:]
+            beta_samp_ARW_1 = β_samp_ARW[2500*P_vec[j]:30000*P_vec[j],:]
+
             @rput beta_samp_ESS_1
             @rput beta_samp_AGESS_1
             @rput beta_samp_GESS_1
@@ -124,10 +125,27 @@ for j in 1:3
 
             R"""
             library(stableGR)
-            ess_ESS <- n.eff(beta_samp_ESS_1)$n.eff
-            ess_GESS <- n.eff(beta_samp_GESS_1)$n.eff
-            ess_AGESS <- n.eff(beta_samp_AGESS_1)$n.eff
-            ess_ARW <- n.eff(beta_samp_ARW_1)$n.eff
+            rg_ESS <- n.eff(beta_samp_ESS_1, epsilon = 0.1)
+            rg_GESS <- n.eff(beta_samp_GESS_1, epsilon = 0.1)
+            rg_AGESS <- n.eff(beta_samp_AGESS_1, epsilon = 0.1)
+            rg_ARW <- n.eff(beta_samp_ARW_1, epsilon = 0.1)
+
+            ess_ESS <- -1
+            ess_GESS <- -1
+            ess_AGESS <- -1
+            ess_ARW <- -1
+            if(rg_ESS$converged == TRUE){
+                ess_ESS <- rg_ESS$n.eff
+            }
+            if(rg_GESS$converged == TRUE){
+                ess_GESS <- rg_GESS$n.eff
+            }
+            if(rg_AGESS$converged == TRUE){
+                ess_AGESS <- rg_AGESS$n.eff
+            }
+            if(rg_ARW$converged == TRUE){
+                ess_ARW <- rg_ARW$n.eff
+            }
             """
 
             @rget ess_ESS
@@ -176,6 +194,12 @@ for j in 1:3
         end
     end
 end
+
+## Set non-converged values equal to 0.01
+ESS_per_second_GESS[ESS_per_second_GESS .< 0] .= 0.001
+ESS_per_second_AGESS[ESS_per_second_AGESS .< 0] .= 0.001
+ESS_per_second_ESS[ESS_per_second_ESS .< 0] .= 0.001
+ESS_per_second_ARW[ESS_per_second_ARW .< 0] .= 0.001
 
 colors = [:red :blue :green :purple]
 ESS_2 = [ESS_per_second_ESS[1,:]'; ESS_per_second_GESS[1,:]'; ESS_per_second_AGESS[1,:]'; ESS_per_second_ARW[1,:]']

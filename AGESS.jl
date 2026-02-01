@@ -257,96 +257,8 @@ function AGESS_SingleStep(x::AbstractMatrix{Y}, z::AbstractVector{Y}, log_poster
     return nothing
 end
 
+
 function AGESS(x::AbstractMatrix{Y}, log_posterior::Function, 
-               μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
-               t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1, single_step_prop::Y = 0.05) where {Y<:AbstractFloat}
-    P = size(x)[2]
-    n_MCMC = size(x)[1]
-    z = zeros(P)
-    burnin_num = floor(Int64, burnin * n_MCMC)
-    t1 = time()
-
-    μ_adapt = copy(μ)
-    ph = similar(μ_adapt)
-
-    Σ_chol = cholesky(Σ)
-    Σ_chol_adapt = deepcopy(Σ_chol)
-
-    Σ_ph =  LowerTriangular(diagm(ones(P)))
-    μ_0 = zeros(P)
-    ph_cholesky_update = ones(P)
-    w_const = max(2/3, ((cbrt(P) - 1) / cbrt(P)))
-
-    for i in 2:n_MCMC
-        if i == burnin_num
-            t1 = time()
-        end
-
-        if P >= 10
-            if i < burnin_num * single_step_prop
-                AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
-            else
-                if rand() > ϵ
-                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
-                                        Σ_chol_adapt.L, i)
-                elseif rand() > 0.5
-                    AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
-                else
-                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
-                end
-            end
-        else
-            if rand() > ϵ
-                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
-                                        Σ_chol_adapt.L, i)
-            else
-                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
-            end
-
-        end
-        
-        
-        ## Adapt mean and covariance
-        w_i = i^(-w_const)
-        Σ_chol_adapt.U .= sqrt((1 - w_i)) .*  Σ_chol_adapt.U
-        @views ph_cholesky_update .= sqrt(w_i) .* (x[i,:] .- μ_adapt)
-        lowrankupdate!(Σ_chol_adapt, ph_cholesky_update)
-        @views μ_adapt .= (1 - w_i) * μ_adapt +  w_i * x[i,:]
-
-        ## Populate next value in Markov Chain
-        if i < n_MCMC
-            @views x[i+1,:] .= x[i,:]
-        end
-
-        # Update User
-        if P >= 10
-            if i < burnin_num * single_step_prop
-                if (i % 25) == 0
-                    println("MCMC iter: ", i)
-                    @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
-                    println("Log Posterior: ", log_lik)
-                end
-            else
-                if (i % 1000) == 0
-                    println("MCMC iter: ", i)
-                    @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
-                    println("Log Posterior: ", log_lik)
-                end
-            end
-        else
-            if (i % 1000) == 0
-                println("MCMC iter: ", i)
-                @views log_lik = @sprintf("%.2f", log_posterior(x[i,:]))
-                println("Log Posterior: ", log_lik)
-            end
-        end
-        
-    end
-
-    return time() - t1, Σ_chol_adapt.L * Σ_chol_adapt.U, μ_adapt
-end
-
-function AGESS1(x::AbstractMatrix{Y}, log_posterior::Function, 
                 μ::AbstractVector{Y}, Σ::AbstractMatrix{Y},
                 t_dist::Bool; ν::Y = 6.0, burnin::Y = 0.5, ϵ::Y = 0.1, 
                 single_step_prop::Y = 0.05, β::Y = 0.5) where {Y<:AbstractFloat}
@@ -364,7 +276,6 @@ function AGESS1(x::AbstractMatrix{Y}, log_posterior::Function,
     Σ_chol_adapt = deepcopy(Σ_chol)
     Σ_chol_adapt_ph = deepcopy(Σ_chol)
 
-    Σ_ph =  LowerTriangular(diagm(ones(P)))
     μ_0 = zeros(P)
     ph_cholesky_update = ones(P)
     w_const = max(2/3, ((cbrt(P) - 1) / cbrt(P)))
@@ -386,7 +297,7 @@ function AGESS1(x::AbstractMatrix{Y}, log_posterior::Function,
                 elseif rand() > 0.5
                     AGESS_SingleStep_1d(x, log_posterior, t_dist, ν, μ_adapt, Σ_chol_adapt.L, i)
                 else
-                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
+                    AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_chol.L, i)
                 end
             end
         else
@@ -394,7 +305,7 @@ function AGESS1(x::AbstractMatrix{Y}, log_posterior::Function,
                 AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_adapt,
                                         Σ_chol_adapt.L, i)
             else
-                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_ph, i)
+                AGESS_SingleStep(x, z, log_posterior, ph, t_dist, ν, μ_0, Σ_chol.L, i)
             end
 
         end
