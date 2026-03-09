@@ -1,12 +1,11 @@
 using StanBase
-#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
+# Set path to STAN
+set_cmdstan_home!(".\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity
 
-#dir = "/Users/ndm34/Projects/AGESS_Simulation/Horseshoe"
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Horseshoe"
+dir = ".\\Horseshoe"
 model = "
 data {
   int N;

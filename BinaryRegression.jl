@@ -1,8 +1,7 @@
 using LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots
 
 include("AGESS.jl")
-#dir = "//Users//ndm34//Projects//AGESS_Simulation//BinaryRegression"
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\BinaryRegression"
+dir = ".\\BinaryRegression"
 
 ## Function to generate the data
 function generate_data(N::T, P::T, ν::Y = 6.0) where {Y<:AbstractFloat, T<:Integer}

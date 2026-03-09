@@ -1,12 +1,12 @@
 using StanBase
-#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
+# Set path to STAN
+set_cmdstan_home!(".\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity, Trapz
 
 
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\Banana"
+dir = ".\\Banana"
 
 model = "
 data {
@@ -38,6 +38,32 @@ if !isdir(string(dir ,"//Twin_Bananas"))
     mkdir(string(dir ,"//Twin_Bananas"))
 end
 
+function log_posterior(theta::AbstractVector{<:AbstractFloat}, Y::Vector{<:AbstractFloat},
+                       mu::Vector{<:AbstractFloat})
+    mean = (theta[1] - mu[1]) + (theta[2] - mu[2])^2 
+    ## Normal distribution for likelihood
+    lpdf = -0.5 * norm(Y .- mean)^2
+    ## Prior distributions 
+    lpdf += -0.125 * theta[1]^2  - 0.125 * (theta[2] - 0.5)^2
+
+    return lpdf
+end
+
+function log_likelihood(theta::AbstractVector{<:AbstractFloat}, Y::Vector{<:AbstractFloat},
+                       mu::Vector{<:AbstractFloat})
+    mean = (theta[1] - mu[1]) + (theta[2] - mu[2])^2 
+    ## Normal distribution for likelihood
+    lpdf = -0.5 * norm(Y .- mean)^2
+
+    return lpdf
+end
+
+function log_prior(theta::AbstractVector{<:AbstractFloat})
+    ## Prior distributions 
+    lpdf = -0.125 * theta[1]^2  - 0.125 * (theta[2] - 0.5)^2
+
+    return lpdf
+end
 
 sm_banana = SampleModel("banana", model);
 
@@ -54,6 +80,7 @@ p3 = scatter()
 p4 = scatter()
 p5 = scatter()
 p_density = scatter()
+μ = zeros(2)
 
 Random.seed!(123)
 for i in 1:100
@@ -61,6 +88,8 @@ for i in 1:100
     μ1 = randn() * 3
     μ2 = randn() * 3
     data = Dict("N" => 100, "y" => randn(100) .+ 1, "mu1" => μ1, "mu2" => μ2);
+    μ[1] = μ1
+    μ[2] = μ2
 
     t1 = time()
     rc = stan_sample(sm_banana; num_cpp_chains=1, num_chains=1, num_warmups=100000, num_samples=100000, data);
@@ -77,19 +106,19 @@ for i in 1:100
 
     mean_norm[i] = (μ1^2 + μ2^2)^0.5
     
-    AGESS_time, Σ_adapt = AGESS(x_AGESS, b -> (logpdf(MvNormal(((b[1] - μ1) + (b[2] - μ2)^2) * ones_N, Σ_I), data["y"]) + logpdf(Normal(0, 2), b[1]) + logpdf(Normal(0.5, 2), b[2])), 
+    AGESS_time, Σ_adapt = AGESS(x_AGESS, b -> log_posterior(b,  data["y"], μ), 
           [0, 0.5], Σ, true)
     
     x_GESS = zeros(MCMC_iters, 2)
-    GESS_time = GESS(x_GESS,  b -> (logpdf(MvNormal(((b[1] - μ1) + (b[2] - μ2)^2)  * ones_N, Σ_I), data["y"]) + logpdf(Normal(0, 2), b[1]) + logpdf(Normal(0.5, 2), b[2])),
+    GESS_time = GESS(x_GESS,  b -> log_posterior(b,  data["y"], μ),
         [0, 0.5], Σ)
     
     x_ESS = zeros(MCMC_iters, 2)
-    ESS_time = ESS(x_ESS,  b -> logpdf(MvNormal(((b[1] - μ1) + (b[2] - μ2)^2)  * ones_N, Σ_I), data["y"]),
+    ESS_time = ESS(x_ESS,  b -> log_likelihood(b,  data["y"], μ),
         [0, 0.5], Σ)
       
     x_ARW = zeros(MCMC_iters, 2)
-    ARW_time = ARW(x_ARW, b -> logpdf(MvNormal(((b[1] - μ1) + (b[2] - μ2)^2)  * ones_N, Σ_I), data["y"]), c -> (logpdf(Normal(0, 2), c[1]) + logpdf(Normal(0.5, 2), c[2])), 1000,
+    ARW_time = ARW(x_ARW, b -> log_likelihood(b,  data["y"], μ), c -> log_prior(c), 1000,
                 0.1, [0, 0.5], Σ)
     
     x_min = minimum([x_ESS[100001:end, 1] x_GESS[100001:end, 1] x_AGESS[100001:end, 1] df[:, 1] x_ARW[100001:end, 1]])
@@ -247,6 +276,7 @@ plot!(size = (1800, 1000))
   
 savefig(string(dir ,"//Banana//Results.pdf"))
 
+
 ####################
 ### Twin Bananas ###
 ####################
@@ -268,8 +298,8 @@ model {
   for (i in 1:N){
     y[i] ~ normal(0.1 * (theta1 - mu1)^2 - 0.5 * (theta2 - mu2)^4 - (10 * (theta1 - mu1) * (theta2 - mu2)),10);
   }
-  theta1 ~ normal(0,1);
-  theta2 ~ normal(0,1);
+  theta1 ~ normal(0,2);
+  theta2 ~ normal(0,2);
 }
 ";
 
@@ -287,7 +317,36 @@ p2 = scatter()
 p3 = scatter()
 p4 = scatter()
 p5 = scatter()
+μ = zeros(2)
 p_density = scatter()
+
+function TB_log_posterior(theta::AbstractVector{<:AbstractFloat}, Y::Vector{<:AbstractFloat}, 
+                          mu::Vector{<:AbstractFloat})
+    m = (0.1 * (theta[1] - mu[1])^2  -  0.5 * (theta[2] - mu[2])^4 - 
+            10 * (theta[1]- mu[1]) * (theta[2]- mu[2])) 
+    ## Normal distribution for likelihood
+    lpdf = -(0.5 / 100) * norm(Y .- m)^2
+    ## Prior distributions 
+    lpdf += -0.125 * theta[1]^2  - 0.125 * theta[2]^2
+
+    return lpdf
+end
+
+function TB_log_likelihood(theta::AbstractVector{<:AbstractFloat}, Y::Vector{<:AbstractFloat},
+                       mu::Vector{<:AbstractFloat})
+    m = (0.1 * (theta[1] - mu[1])^2  -  0.5 * (theta[2] - mu[2])^4 - 
+            10 * (theta[1]- mu[1]) * (theta[2]- mu[2])) 
+    ## Normal distribution for likelihood
+    lpdf = -(0.5 / 100) * norm(Y .- m)^2
+
+    return lpdf
+end
+
+function TB_log_prior(theta::AbstractVector{<:AbstractFloat})
+    ## Prior distributions 
+    lpdf = -0.125 * theta[1]^2  - 0.125 * theta[2]^2
+    return lpdf
+end
 
 Random.seed!(123)
 for i in 1:100
@@ -297,20 +356,22 @@ for i in 1:100
     data = Dict("N" => 100, "y" => randn(100)* 10 .+ 100, "mu1" => μ1, "mu2" => μ2);
     mean_norm[i] = (μ1^2 + μ2^2)^0.5
     x_AGESS = zeros(MCMC_iters, 2)
+    μ[1] = μ1
+    μ[2] = μ2
 
     Σ_I = diagm(ones(length(data["y"])))
     ones_N = ones(length(data["y"]))
     Σ =  diagm(ones(2) .* 4)
 
-    AGESS_time, Σ_adapt = AGESS(x_AGESS, b -> (logpdf(MvNormal((0.1 * (b[1] - μ1)^2  -  0.5 * (b[2] - μ2)^4 - 10 * (b[1]- μ1) * (b[2]- μ2)) * ones_N, 100 * Σ_I), data["y"]) + logpdf(Normal(0, 2), b[1]) + logpdf(Normal(0, 2), b[2])), 
+    AGESS_time, Σ_adapt = AGESS(x_AGESS, b -> TB_log_posterior(b,  data["y"], μ), 
           [0.0, 0.0], Σ, true)
 
     x_GESS = zeros(MCMC_iters, 2)
-    GESS_time = GESS(x_GESS,  b -> (logpdf(MvNormal((0.1 * (b[1] - μ1)^2  -  0.5 * (b[2] - μ2)^4 - 10 * (b[1]- μ1) * (b[2]- μ2)) * ones_N, 100 * Σ_I), data["y"]) + logpdf(Normal(0, 2), b[1]) + logpdf(Normal(0, 2), b[2])),
+    GESS_time = GESS(x_GESS,  b -> TB_log_posterior(b,  data["y"], μ),
         [0.0, 0.0], Σ)
 
     x_ESS = zeros(MCMC_iters, 2)
-    ESS_time = ESS(x_ESS,  b -> logpdf(MvNormal((0.1 * (b[1] - μ1)^2  -  0.5 * (b[2] - μ2)^4 - 10 * (b[1]- μ1) * (b[2]- μ2)) * ones_N, 100 * Σ_I), data["y"]),
+    ESS_time = ESS(x_ESS,  b -> TB_log_likelihood(b,  data["y"], μ),
                   [0.0, 0.0], Σ)
       
 
@@ -326,7 +387,7 @@ for i in 1:100
 
       ## Fit model using ARW
       x_ARW = zeros(MCMC_iters, 2)
-      ARW_time = ARW(x_ARW, b -> logpdf(MvNormal((0.1 * (b[1] - μ1)^2  -  0.5 * (b[2] - μ2)^4 - 10 * (b[1]- μ1) * (b[2]- μ2)) * ones_N, 100 * Σ_I), data["y"]), c -> (logpdf(Normal(0, 2), c[1]) + logpdf(Normal(0, 2), c[2])), 1000,
+      ARW_time = ARW(x_ARW, b -> TB_log_likelihood(b,  data["y"], μ), c -> TB_log_prior(c), 1000,
                   0.1, [0.0, 0.0], Σ)
 
     

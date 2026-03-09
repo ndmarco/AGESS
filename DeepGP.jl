@@ -1,12 +1,11 @@
 using KernelFunctions, LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots
 using StanBase
-#set_cmdstan_home!("/Users/ndm34/Projects/cmdstan")
-set_cmdstan_home!("C:\\Users\\ndmar\\Projects\\cmdstan")
+# Set path to STAN
+set_cmdstan_home!(".\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
 
-#dir = "/Users/ndm34/Projects/AGESS_Simulation/DeepGp"
-dir = "C:\\Users\\ndmar\\Projects\\AGESS_Simulation\\DeepGP"
+dir = ".\\DeepGP"
 
 
 function gen_data(N::T, min_eval::Y, max_eval::Y) where {Y<:AbstractFloat, T<:Integer}
