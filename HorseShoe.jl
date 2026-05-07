@@ -182,7 +182,6 @@ for i in 1:25
     @rput x_stan1
     R"""
     library(stableGR)
-    library(stableGR)
     ess_AGESS <- -1
     ess_HS <- -1
     ess_Stan <- -1
