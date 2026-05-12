@@ -118,12 +118,12 @@ total_time_ARW = time() - t2
 
 n_0 = 100*D
 
-ess_ESS_alpha_total[1] = ESS_fx(x_samp_ESS_alpha[5000*D:10000*D,:], n_0)
-ess_ESS_alpha10_total[1] = ESS_fx(x_samp_ESS_alpha10[5000*D:10000*D,:], n_0)
-ess_AGESS_total[1] = ESS_fx(x_samp_AGESS[5000*D:10000*D,:], n_0)
-ess_AGESS_norm_total[1] = ESS_fx(x_samp_AGESS_norm[5000*D:10000*D,:], n_0)
-ess_ESS_total[1] = ESS_fx(x_samp_ESS[5000*D:10000*D,:], n_0)
-ess_ARW_total[1] = ESS_fx(x_samp_ARW[5000*D:10000*D,:], n_0)
+ess_ESS_alpha_total[1] = ESS_fx(x_samp_ESS_alpha[6000*D:10000*D,:], n_0)
+ess_ESS_alpha10_total[1] = ESS_fx(x_samp_ESS_alpha10[6000*D:10000*D,:], n_0)
+ess_AGESS_total[1] = ESS_fx(x_samp_AGESS[6000*D:10000*D,:], n_0)
+ess_AGESS_norm_total[1] = ESS_fx(x_samp_AGESS_norm[6000*D:10000*D,:], n_0)
+ess_ESS_total[1] = ESS_fx(x_samp_ESS[6000*D:10000*D,:], n_0)
+ess_ARW_total[1] = ESS_fx(x_samp_ARW[6000*D:10000*D,:], n_0)
 
 ## D= 100
 D = 100
@@ -167,12 +167,12 @@ total_time_ARW = time() - t2
 
 
 n_0 = 100*D
-ess_ESS_alpha_total[2] = ESS_fx(x_samp_ESS_alpha[2000*D:10000*D,:], n_0)
-ess_ESS_alpha10_total[2] = ESS_fx(x_samp_ESS_alpha10[2000*D:10000*D,:], n_0)
-ess_AGESS_total[2] = ESS_fx(x_samp_AGESS[2000*D:10000*D,:], n_0)
-ess_AGESS_norm_total[2] = ESS_fx(x_samp_AGESS_norm[2000*D:10000*D,:], n_0)
-ess_ESS_total[2] = ESS_fx(x_samp_ESS[2000*D:10000*D,:], n_0)
-ess_ARW_total[2] = ESS_fx(x_samp_ARW[2000*D:10000*D,:], n_0)
+ess_ESS_alpha_total[2] = ESS_fx(x_samp_ESS_alpha[6000*D:10000*D,:], n_0)
+ess_ESS_alpha10_total[2] = ESS_fx(x_samp_ESS_alpha10[6000*D:10000*D,:], n_0)
+ess_AGESS_total[2] = ESS_fx(x_samp_AGESS[6000*D:10000*D,:], n_0)
+ess_AGESS_norm_total[2] = ESS_fx(x_samp_AGESS_norm[6000*D:10000*D,:], n_0)
+ess_ESS_total[2] = ESS_fx(x_samp_ESS[6000*D:10000*D,:], n_0)
+ess_ARW_total[2] = ESS_fx(x_samp_ARW[6000*D:10000*D,:], n_0)
 
 
 ###
