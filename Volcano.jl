@@ -1,5 +1,5 @@
 include("AGESS.jl")
-using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots
+using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, LaTeXStrings
 dir = ".\\Volcano"
 
 function log_posterior(X::AbstractVector{<:AbstractFloat})
@@ -330,16 +330,20 @@ ess_ESS = ESS_fx(x_samp_ESS[20*D:5000*D,:], n_0, n_1, n_2)
 ess_ESS_opt = ESS_fx(x_samp_ESS_opt[20*D:5000*D,:], n_0, n_1, n_2)
 ess_ARW = ESS_fx(x_samp_ARW[20*D:5000*D,:], n_0, n_1, n_2)
 
-iters = collect(1:500:1990500)
-plot(iters, ess_ESS_alpha, yscale=:log10, yticks = [0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001,1.1], label = "ESS α", xlim = [1,2000000])
-plot!(iters, ess_AGESS, label = "AGESS")
-plot!(iters, ess_AGESS_norm, label = "AGESS_norm")
-plot!(iters, ess_ESS, label = "ESS")
-plot!(iters, ess_ESS_opt, label = "ESS optimal")
-plot!(iters, ess_ARW, label = "ARW")
-ylabel!("Effective Sample Size per Iteration")
+labels = ["ESS (α)" "AGESS (t)" "AGESS (Normal)" "ESS" "ESS (optimal)" "ARW"]
+colors = [:red :green :purple :blue :orange :black]
+linestyles = [:solid :dash :dot :dashdot :dashdotdot :solid]
+shapes = [:circle :rect :utriangle :diamond :star5 :xcross]
+
+iters = collect(1:500:1_990_500)
+ess_iter = [ess_ESS_alpha ess_AGESS ess_AGESS_norm ess_ESS ess_ESS_opt ess_ARW]
+plot(iters, ess_iter, label = labels, color = colors, linestyle = linestyles, linewidth = 2,
+     yscale = :log10, yticks = [0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001, 1.1], xlim = [1, 2_000_000],
+     legend = :outerright, fontfamily = "Computer Modern", titlefontsize = 16, guidefontsize = 14,
+     tickfontsize = 12, legendfontsize = 12, framestyle = :axes, grid = false)
+ylabel!(L"Effective Sample Size per Iteration ($\|x\|^2$)")
 xlabel!("MCMC Iteration")
-plot!(size = (750, 500))
+plot!(size = (1600, 700), dpi = 300)
 savefig(string(dir ,"//ESS_iteration_500.pdf"))
 
 n_0 = 100*D
@@ -352,13 +356,12 @@ ess_ARW_total[3] = ESS_fx(x_samp_ARW[3000*D:5000*D,:], n_0)
 
 
 D_vec = [10, 100, 500]
-plot(D_vec, ess_ESS_alpha_total, yscale=:log10, yticks = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001,1.1], label = "ESS α", legend =:top, markershape=:circle, markersize = 6)
-plot!(D_vec, ess_AGESS_total, label = "AGESS", markershape=:circle, markersize = 6)
-plot!(D_vec, ess_AGESS_norm_total, label = "AGESS_norm", markershape=:circle, markersize = 6)
-plot!(D_vec, ess_ESS_total, label = "ESS", markershape=:circle, markersize = 6)
-plot!(D_vec, ess_ESS_opt_total, label = "ESS optimal", markershape=:circle, markersize = 6)
-plot!(D_vec, ess_ARW_total, label = "ARW", markershape=:circle, markersize = 6)
-ylabel!("Effective Sample Size per Iteration")
+ess_total = [ess_ESS_alpha_total ess_AGESS_total ess_AGESS_norm_total ess_ESS_total ess_ESS_opt_total ess_ARW_total]
+plot(D_vec, ess_total, label = labels, color = colors, shape = shapes, markersize = 8, markerstrokewidth = 0,
+     linewidth = 2, yscale = :log10, yticks = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001, 1.1],
+     legend = :outerright, fontfamily = "Computer Modern", titlefontsize = 16, guidefontsize = 14,
+     tickfontsize = 12, legendfontsize = 12, framestyle = :axes, grid = false)
+ylabel!(L"Effective Sample Size per Iteration ($\|x\|^2$)")
 xlabel!("Dimension of Target Distribution")
-plot!(size = (750, 500))
+plot!(size = (1600, 700), dpi = 300)
 savefig(string(dir ,"//ESS.pdf"))

@@ -1,9 +1,9 @@
 using StanBase
 # Set path to STAN
-set_cmdstan_home!(".\\cmdstan")
+set_cmdstan_home!("C:\\cmdstan")
 using StanSample, DataFrames, Stan
 include("AGESS.jl")
-using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity, Trapz
+using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random, StatsBase, RCall, StatsPlots, KernelDensity, Trapz, Printf
 
 
 dir = ".\\Banana"
@@ -65,13 +65,54 @@ function log_prior(theta::AbstractVector{<:AbstractFloat})
     return lpdf
 end
 
+function summarize_column(v::AbstractVector{<:Real})
+    return (mean = mean(v), std = std(v), median = median(v),
+            q10 = quantile(v, 0.10), q90 = quantile(v, 0.90))
+end
+ 
+function write_ess_summary_table(filepath::AbstractString,
+                                  ESS_per_second::AbstractMatrix{<:Real},
+                                  ESS_per_iter::AbstractMatrix{<:Real},
+                                  ESS_per_likelihood::AbstractMatrix{<:Real};
+                                  method_names = ["ESS", "GESS", "AGESS"])
+    metrics = [
+        ("ESS per Second",               ESS_per_second),
+        ("ESS per Iteration",            ESS_per_iter),
+        ("ESS per Likelihood Evaluation", ESS_per_likelihood),
+    ]
+ 
+    open(filepath, "w") do io
+        println(io, "Summary Statistics: Banana Distribution (n = ", size(ESS_per_second, 1), " reps)")
+        println(io, "="^70)
+        println(io)
+        for (metric_name, M) in metrics
+            println(io, metric_name)
+            println(io, "-"^70)
+            @printf(io, "%-10s %20s %24s\n", "Method", "Mean ± SD", "Median [Q10, Q90]")
+            for (j, name) in enumerate(method_names)
+                s = summarize_column(view(M, :, j))
+                mean_sd_str = @sprintf("%.4g ± %.4g", s.mean, s.std)
+                median_iqr_str = @sprintf("%.4g [%.4g, %.4g]", s.median, s.q10, s.q90)
+                @printf(io, "%-10s %20s %24s\n", name, mean_sd_str, median_iqr_str)
+            end
+            println(io)
+        end
+    end
+ 
+    println("Summary table written to: ", filepath)
+end
+
 sm_banana = SampleModel("banana", model);
 
 MCMC_iters = 200000
 
 ESS_per_second_banana = zeros(100, 3)
+ESS_per_iter_banana = zeros(100, 3)
+ESS_per_likelihood_banana = zeros(100, 3)
 colors = [:red :blue :green :orange :purple]
 KL_dist_banana = zeros(100, 5)
+total_evals_banana = zeros(100, 3)
+total_time = zeros(100, 3)
 
 mean_norm = zeros(100)
 p1 = scatter()
@@ -97,7 +138,6 @@ for i in 1:100
 
     df = read_samples(sm_banana, :array);
 
-
     x_AGESS = zeros(MCMC_iters, 2)
 
     Σ_I = diagm(ones(length(data["y"])))
@@ -106,15 +146,15 @@ for i in 1:100
 
     mean_norm[i] = (μ1^2 + μ2^2)^0.5
     
-    AGESS_time, Σ_adapt = AGESS(x_AGESS, b -> log_posterior(b,  data["y"], μ), 
+    AGESS_time, Σ_adapt, μ_adapt, total_evals_banana[i,3] = AGESS(x_AGESS, b -> log_posterior(b,  data["y"], μ), 
           [0, 0.5], Σ, true)
     
     x_GESS = zeros(MCMC_iters, 2)
-    GESS_time = GESS(x_GESS,  b -> log_posterior(b,  data["y"], μ),
+    GESS_time, total_evals_banana[i,2] = GESS(x_GESS,  b -> log_posterior(b,  data["y"], μ),
         [0, 0.5], Σ)
     
     x_ESS = zeros(MCMC_iters, 2)
-    ESS_time = ESS(x_ESS,  b -> log_likelihood(b,  data["y"], μ),
+    ESS_time, total_evals_banana[i,1] = ESS(x_ESS,  b -> log_likelihood(b,  data["y"], μ),
         [0, 0.5], Σ)
       
     x_ARW = zeros(MCMC_iters, 2)
@@ -221,6 +261,14 @@ for i in 1:100
     ESS_per_second_banana[i,2] = ess_GESS / GESS_time
     ESS_per_second_banana[i,3] = ess_AGESS / AGESS_time
 
+    ESS_per_iter_banana[i,1] = ess_ESS / size(x_ESS1, 1)
+    ESS_per_iter_banana[i,2] = ess_GESS / size(x_GESS1, 1)
+    ESS_per_iter_banana[i,3] = ess_AGESS / size(x_AGESS1, 1)
+
+    ESS_per_likelihood_banana[i,1] = ess_ESS / total_evals_banana[i,1]
+    ESS_per_likelihood_banana[i,2] = ess_GESS / total_evals_banana[i,2]
+    ESS_per_likelihood_banana[i,3] = ess_AGESS / total_evals_banana[i,3]
+
     save(string(dir ,"//Banana//Sim", i,".jld2"), Dict("x_ESS" => x_ESS, 
                                                        "x_GESS" => x_GESS,
                                                        "x_AGESS" => x_AGESS,
@@ -239,6 +287,9 @@ for i in 1:100
                                                        "AGESS_time" => AGESS_time,
                                                        "HMC_time" => stan_time * 0.5,
                                                        "ARW_time" => AGESS_time,
+                                                       "ESS_evals" => total_evals_banana[i,1],
+                                                       "GESS_evals" => total_evals_banana[i,2],
+                                                       "AGESS_evals" => total_evals_banana[i,3],
                                                        "μ1" => μ1,
                                                        "μ2" => μ2,
                                                        "y" => data["y"]))
@@ -254,6 +305,14 @@ for i in 1:100
     ESS_per_second_banana[i,1] = sim["ess_ESS"] /  sim["ESS_time"]
     ESS_per_second_banana[i,2] = sim["ess_GESS"] / sim["GESS_time"]
     ESS_per_second_banana[i,3] = sim["ess_AGESS"] / sim["AGESS_time"]
+
+    ESS_per_iter_banana[i,1] = sim["ess_ESS"] / (0.5 * MCMC_iters)
+    ESS_per_iter_banana[i,2] = sim["ess_GESS"] / (0.5 * MCMC_iters)
+    ESS_per_iter_banana[i,3] = sim["ess_AGESS"] / (0.5 * MCMC_iters)
+
+    ESS_per_likelihood_banana[i,1] = sim["ess_ESS"] /  sim["ESS_evals"]
+    ESS_per_likelihood_banana[i,2] = sim["ess_GESS"] / sim["GESS_evals"]
+    ESS_per_likelihood_banana[i,3] = sim["ess_AGESS"] / sim["AGESS_evals"]
 
     mean_norm[i] = (sim["μ1"]^2 + sim["μ2"]^2)^0.5
   end
@@ -275,6 +334,9 @@ plot(p_density, p1, p2, p6, p3, p4, p5, p7, layout = @layout([A B C D; E F G H])
 plot!(size = (1800, 1000))
   
 savefig(string(dir ,"//Banana//Results.pdf"))
+
+write_ess_summary_table(string(dir, "//Banana//summary_stats.txt"),
+                         ESS_per_second_banana, ESS_per_iter_banana, ESS_per_likelihood_banana)
 
 
 ####################
@@ -307,8 +369,11 @@ sm_twin_bananas = SampleModel("Twin_bananas", model);
 
 MCMC_iters = 500000
 ESS_per_second_twin_bananas = zeros(100, 3)
+ESS_per_iter_twin_bananas = zeros(100, 3)
+ESS_per_likelihood_twin_bananas = zeros(100, 3)
 colors = [:red :blue :green :orange :purple]
 KL_dist_twin_banana = zeros(100, 3)
+total_evals_twin_banana = zeros(100, 3)
 
 mean_norm = zeros(100)
 Random.seed!(1234)
@@ -363,15 +428,15 @@ for i in 1:100
     ones_N = ones(length(data["y"]))
     Σ =  diagm(ones(2) .* 4)
 
-    AGESS_time, Σ_adapt = AGESS(x_AGESS, b -> TB_log_posterior(b,  data["y"], μ), 
+    AGESS_time, Σ_adapt, μ_adapt, total_evals_twin_banana[i,3] = AGESS(x_AGESS, b -> TB_log_posterior(b,  data["y"], μ), 
           [0.0, 0.0], Σ, true)
 
     x_GESS = zeros(MCMC_iters, 2)
-    GESS_time = GESS(x_GESS,  b -> TB_log_posterior(b,  data["y"], μ),
+    GESS_time, total_evals_twin_banana[i,2] = GESS(x_GESS,  b -> TB_log_posterior(b,  data["y"], μ),
         [0.0, 0.0], Σ)
 
     x_ESS = zeros(MCMC_iters, 2)
-    ESS_time = ESS(x_ESS,  b -> TB_log_likelihood(b,  data["y"], μ),
+    ESS_time, total_evals_twin_banana[i,1] = ESS(x_ESS,  b -> TB_log_likelihood(b,  data["y"], μ),
                   [0.0, 0.0], Σ)
       
 
@@ -476,6 +541,14 @@ for i in 1:100
     ESS_per_second_twin_bananas[i,2] = ess_GESS / GESS_time
     ESS_per_second_twin_bananas[i,3] = ess_AGESS / AGESS_time
 
+    ESS_per_iter_twin_bananas[i,1] = ess_ESS / (0.5 * MCMC_iters)
+    ESS_per_iter_twin_bananas[i,2] = ess_GESS / (0.5 * MCMC_iters)
+    ESS_per_iter_twin_bananas[i,3] = ess_AGESS / (0.5 * MCMC_iters)
+
+    ESS_per_likelihood_twin_bananas[i,1] = ess_ESS /  total_evals_twin_banana[i,1]
+    ESS_per_likelihood_twin_bananas[i,2] = ess_GESS / total_evals_twin_banana[i,2]
+    ESS_per_likelihood_twin_bananas[i,3] = ess_AGESS / total_evals_twin_banana[i,3]
+
     save(string(dir ,"//Twin_Bananas//Sim", i,".jld2"), Dict("x_ESS" => x_ESS, 
                                                              "x_GESS" => x_GESS,
                                                              "x_AGESS" => x_AGESS,
@@ -488,6 +561,9 @@ for i in 1:100
                                                              "ESS_time" => ESS_time,
                                                              "GESS_time" => GESS_time,
                                                              "AGESS_time" => AGESS_time,
+                                                             "ESS_evals" => total_evals_twin_banana[i,1],
+                                                             "GESS_evals" => total_evals_twin_banana[i,2],
+                                                             "AGESS_evals" => total_evals_twin_banana[i,3],
                                                              "μ1" => μ1,
                                                              "μ2" => μ2,
                                                              "y" => data["y"]))
@@ -497,6 +573,14 @@ for i in 1:100
     ESS_per_second_twin_bananas[i,1] = sim["ess_ESS"] /  sim["ESS_time"]
     ESS_per_second_twin_bananas[i,2] = sim["ess_GESS"] / sim["GESS_time"]
     ESS_per_second_twin_bananas[i,3] = sim["ess_AGESS"] / sim["AGESS_time"]
+
+    ESS_per_iter_twin_bananas[i,1] = sim["ess_ESS"] / (0.5 * MCMC_iters)
+    ESS_per_iter_twin_bananas[i,2] = sim["ess_GESS"] / (0.5 * MCMC_iters)
+    ESS_per_iter_twin_bananas[i,3] = sim["ess_AGESS"] / (0.5 * MCMC_iters)
+
+    ESS_per_likelihood_twin_bananas[i,1] = sim["ess_ESS"] /  sim["ESS_evals"]
+    ESS_per_likelihood_twin_bananas[i,2] = sim["ess_GESS"] / sim["GESS_evals"]
+    ESS_per_likelihood_twin_bananas[i,3] = sim["ess_AGESS"] / sim["AGESS_evals"]
 
     KL_dist_twin_banana[i, 1] =sim["KL_ESS"]
     KL_dist_twin_banana[i, 2] = sim["KL_GESS"]
@@ -520,3 +604,6 @@ ylabel!("Relative KL Divergence")
 plot(p_density, p1, p2, p6, p3, p4, p5,  p7, layout = @layout([A B C D; E F G H] ), margin= 5Plots.mm)
 plot!(size = (1800, 1000))
 savefig(string(dir ,"//Twin_Bananas//Results.pdf"))
+
+write_ess_summary_table(string(dir, "//Twin_Bananas//summary_stats.txt"),
+                         ESS_per_second_twin_bananas, ESS_per_iter_twin_bananas, ESS_per_likelihood_twin_bananas)
