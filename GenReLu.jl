@@ -315,7 +315,7 @@ xlabel!("Proportion of μ that are zero")
 legend_plot = scatter(fill(NaN, 1, 4), color = colors, shape = shapes, markerstrokewidth = 0, markersize = 8,
                        label = labels, legend = :inside, legend_columns = 4, framestyle = :none, grid = false)
 
-plot(scatter1, scatter2, scatter3, legend_plot, layout = @layout([A B C; D{0.12h}]), margin = 10Plots.mm,
+plot(scatter1, scatter2, scatter3, legend_plot, layout = @layout([A B C; D{0.12h}]), margin = 13Plots.mm,
      fontfamily = "Computer Modern", titlefontsize = 28, guidefontsize = 24, tickfontsize = 20,
      legendfontsize = 20, grid = false)
 plot!(size = (2100, 800))

@@ -3,6 +3,15 @@ using LinearAlgebra, LogExpFunctions, Distributions, LinearAlgebra, JLD2, Random
 dir = ".\\Normal"
 
 
+function sci_format(v::Real)
+    v == 0 && return "0"
+    s = @sprintf("%.1e", v)
+    mantissa, expstr = split(s, 'e')
+    e = parse(Int, expstr)
+    mantissa = replace(mantissa, r"\.0$" => "")
+    return string(mantissa, "e", e)
+end
+
 function log_posterior(X::AbstractVector{<:AbstractFloat})
     lpdf =  -0.5 * norm(X)^2
     return lpdf
@@ -21,7 +30,7 @@ end
 
 
 function log_prior(X::AbstractVector{<:AbstractFloat})
-    ## Prior distributions 
+    ## Prior distributions
     lpdf = -0.5 * norm(X)^2
 
     return lpdf
@@ -34,7 +43,7 @@ function ESS_fx(MCMC::AbstractMatrix{<:AbstractFloat},
     f_x = zeros(n_1)
     for j in 1:(n_1)
         @views f_x[j] = norm(MCMC[j,:])
-    end 
+    end
 
     index = 1
     for i in 1:n_2:n_calcs
@@ -63,6 +72,17 @@ function ESS_fx(MCMC::AbstractMatrix{<:AbstractFloat},
     return 1 / ESS_est
 end
 
+# Runs a single chain, evaluates each of `analyses` against it, then drops the
+# chain (which at D=500 is ~10GB) so it's GC-eligible before the next chain is
+# allocated -- only one big MCMC matrix is ever resident at a time.
+function run_and_ess(x_size::NTuple{2,Int}, sampler!::Function, analyses::Vector{<:Function})
+    x_samp = zeros(x_size)
+    sampler!(x_samp)
+    results = [f(x_samp) for f in analyses]
+    x_samp = nothing
+    GC.gc()
+    return results
+end
 
 
 Random.seed!(1234)
@@ -72,195 +92,108 @@ ess_AGESS_norm_total = zeros(3)
 ess_ESS_total = zeros(3)
 ess_ESS_alpha10_total = zeros(3)
 ess_ARW_total = zeros(3)
+
 ### D = 10
 D = 10
-Σ = diagm(ones(D)* 2)
+n_0 = 100*D
+total_range = 6000*D:10000*D
 μ_j = zeros(D)
 
-
-x_samp_ESS_alpha = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS_alpha, x -> log_likelihood_alpha(x, 1.0), μ_j, Σ, burnin = 0.25)
-total_time_ESS_alpha = time() - t2
+Σ = diagm(ones(D)* 2)
+ess_ESS_alpha_total[1] = run_and_ess((10000*D, D), x -> ESS(x, y -> log_likelihood_alpha(y, 1.0), μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
 
 Σ = diagm(ones(D)* 10)
-μ_j = zeros(D)
-x_samp_ESS_alpha10 = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS_alpha10, x -> log_likelihood_alpha(x, 9.0), μ_j, Σ, burnin = 0.25)
-total_time_ESS_alpha2 = time() - t2
-
-
-x_samp_AGESS = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_AGESS, Σ_adapt = AGESS(x_samp_AGESS, log_posterior, μ_j, Σ, true, burnin = 0.25)
-total_time_AGESS = time() - t2
-
-x_samp_AGESS_norm = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_AGESS_norm, Σ_adapt_norm = AGESS(x_samp_AGESS_norm, log_posterior, μ_j, Σ, false, burnin = 0.25)
-total_time_AGESS_norm = time() - t2
+ess_ESS_alpha10_total[1] = run_and_ess((10000*D, D), x -> ESS(x, y -> log_likelihood_alpha(y, 9.0), μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+ess_AGESS_total[1] = run_and_ess((10000*D, D), x -> AGESS(x, log_posterior, μ_j, Σ, true, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+ess_AGESS_norm_total[1] = run_and_ess((10000*D, D), x -> AGESS(x, log_posterior, μ_j, Σ, false, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
 
 Σ = diagm(ones(D))
-μ_j = zeros(D)
-x_samp_ESS = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS, log_likelihood_opt, μ_j, Σ, burnin = 0.25)
-total_time_ESS = time() - t2
+ess_ESS_total[1] = run_and_ess((10000*D, D), x -> ESS(x, log_likelihood_opt, μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+ess_ARW_total[1] = run_and_ess((10000*D, D), x -> ARW(x, log_likelihood_opt, log_prior, 10000, 0.01, μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
 
 
-Σ = diagm(ones(D))
-
-x_samp_ARW = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ARW = ARW(x_samp_ARW,log_likelihood_opt, log_prior, 10000, 0.01, μ_j, Σ, burnin = 0.25)
-total_time_ARW = time() - t2
-
-n_0 = 100*D
-
-ess_ESS_alpha_total[1] = ESS_fx(x_samp_ESS_alpha[6000*D:10000*D,:], n_0)
-ess_ESS_alpha10_total[1] = ESS_fx(x_samp_ESS_alpha10[6000*D:10000*D,:], n_0)
-ess_AGESS_total[1] = ESS_fx(x_samp_AGESS[6000*D:10000*D,:], n_0)
-ess_AGESS_norm_total[1] = ESS_fx(x_samp_AGESS_norm[6000*D:10000*D,:], n_0)
-ess_ESS_total[1] = ESS_fx(x_samp_ESS[6000*D:10000*D,:], n_0)
-ess_ARW_total[1] = ESS_fx(x_samp_ARW[6000*D:10000*D,:], n_0)
-
-## D= 100
+## D = 100
 D = 100
-Σ = diagm(ones(D)* 2)
-μ_j = zeros(D)
-
-
-x_samp_ESS_alpha = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS_alpha,  x -> log_likelihood_alpha(x, 1.0), μ_j, Σ, burnin = 0.25)
-total_time_ESS_alpha = time() - t2
-
-Σ = diagm(ones(D)* 10)
-μ_j = zeros(D)
-x_samp_ESS_alpha10 = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS_alpha10, x -> log_likelihood_alpha(x, 9.0), μ_j, Σ, burnin = 0.25)
-total_time_ESS_alpha2 = time() - t2
-
-x_samp_AGESS = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_AGESS, Σ_adapt = AGESS(x_samp_AGESS, log_posterior, μ_j, Σ, true, burnin = 0.25)
-total_time_AGESS = time() - t2
-
-x_samp_AGESS_norm = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_AGESS_norm, Σ_adapt_norm = AGESS(x_samp_AGESS_norm, log_posterior, μ_j, Σ, false, burnin = 0.25)
-total_time_AGESS_norm = time() - t2
-
-Σ = diagm(ones(D))
-μ_j = zeros(D)
-x_samp_ESS = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS, log_likelihood_opt, μ_j, Σ, burnin = 0.25)
-total_time_ESS = time() - t2
-
-x_samp_ARW = zeros(10000 * D, D)
-t2 = time()
-time_non_burnin_ARW = ARW(x_samp_ARW,log_likelihood_opt, log_prior, 10000, 0.01, μ_j, Σ, burnin = 0.25)
-total_time_ARW = time() - t2
-
-
 n_0 = 100*D
-ess_ESS_alpha_total[2] = ESS_fx(x_samp_ESS_alpha[6000*D:10000*D,:], n_0)
-ess_ESS_alpha10_total[2] = ESS_fx(x_samp_ESS_alpha10[6000*D:10000*D,:], n_0)
-ess_AGESS_total[2] = ESS_fx(x_samp_AGESS[6000*D:10000*D,:], n_0)
-ess_AGESS_norm_total[2] = ESS_fx(x_samp_AGESS_norm[6000*D:10000*D,:], n_0)
-ess_ESS_total[2] = ESS_fx(x_samp_ESS[6000*D:10000*D,:], n_0)
-ess_ARW_total[2] = ESS_fx(x_samp_ARW[6000*D:10000*D,:], n_0)
-
-
-###
-D = 500
-Σ = diagm(ones(D)* 2)
+total_range = 6000*D:10000*D
 μ_j = zeros(D)
 
-
-x_samp_ESS_alpha = zeros(5000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS_alpha, x -> log_likelihood_alpha(x, 1.0), μ_j, Σ, burnin = 0.25)
-total_time_ESS_alpha = time() - t2
-
+Σ = diagm(ones(D)* 2)
+ess_ESS_alpha_total[2] = run_and_ess((10000*D, D), x -> ESS(x, y -> log_likelihood_alpha(y, 1.0), μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
 
 Σ = diagm(ones(D)* 10)
-μ_j = zeros(D)
-x_samp_ESS_alpha10 = zeros(5000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS_alpha10, x -> log_likelihood_alpha(x, 9.0), μ_j, Σ, burnin = 0.25)
-total_time_ESS_alpha2 = time() - t2
-
-x_samp_AGESS = zeros(5000 * D, D)
-t2 = time()
-time_non_burnin_AGESS, Σ_adapt = AGESS(x_samp_AGESS, log_posterior, μ_j, Σ, true, burnin = 0.25)
-total_time_AGESS = time() - t2
-
-x_samp_AGESS_norm = zeros(5000 * D, D)
-t2 = time()
-time_non_burnin_AGESS_norm, Σ_adapt_norm = AGESS(x_samp_AGESS_norm, log_posterior, μ_j, Σ, false, burnin = 0.25)
-total_time_AGESS_norm = time() - t2
+ess_ESS_alpha10_total[2] = run_and_ess((10000*D, D), x -> ESS(x, y -> log_likelihood_alpha(y, 9.0), μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+ess_AGESS_total[2] = run_and_ess((10000*D, D), x -> AGESS(x, log_posterior, μ_j, Σ, true, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+ess_AGESS_norm_total[2] = run_and_ess((10000*D, D), x -> AGESS(x, log_posterior, μ_j, Σ, false, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
 
 Σ = diagm(ones(D))
+ess_ESS_total[2] = run_and_ess((10000*D, D), x -> ESS(x, log_likelihood_opt, μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+ess_ARW_total[2] = run_and_ess((10000*D, D), x -> ARW(x, log_likelihood_opt, log_prior, 10000, 0.01, μ_j, Σ, burnin = 0.25),
+    [x -> ESS_fx(@view(x[total_range,:]), n_0)])[1]
+
+
+## D = 500
+D = 500
+n_0_total = 100*D
+total_range = 3000*D:5000*D
+n_0_iter, n_1_iter, n_2_iter = 5000, 500000, 500
+iter_range = 20*D:5000*D
 μ_j = zeros(D)
-x_samp_ESS = zeros(5000 * D, D)
-t2 = time()
-time_non_burnin_ESS = ESS(x_samp_ESS, log_likelihood_opt, μ_j, Σ, burnin = 0.25)
-total_time_ESS = time() - t2
+analyses() = [x -> ESS_fx(@view(x[total_range,:]), n_0_total),
+              x -> ESS_fx(@view(x[iter_range,:]), n_0_iter, n_1_iter, n_2_iter)]
 
+Σ = diagm(ones(D)* 2)
+ess_ESS_alpha_total[3], ess_ESS_alpha = run_and_ess((5000*D, D), x -> ESS(x, y -> log_likelihood_alpha(y, 1.0), μ_j, Σ, burnin = 0.25), analyses())
 
+Σ = diagm(ones(D)* 10)
+ess_ESS_alpha10_total[3], ess_ESS_alpha10 = run_and_ess((5000*D, D), x -> ESS(x, y -> log_likelihood_alpha(y, 9.0), μ_j, Σ, burnin = 0.25), analyses())
+ess_AGESS_total[3], ess_AGESS = run_and_ess((5000*D, D), x -> AGESS(x, log_posterior, μ_j, Σ, true, burnin = 0.25), analyses())
+ess_AGESS_norm_total[3], ess_AGESS_norm = run_and_ess((5000*D, D), x -> AGESS(x, log_posterior, μ_j, Σ, false, burnin = 0.25), analyses())
 
-x_samp_ARW = zeros(5000 * D, D)
-t2 = time()
-time_non_burnin_ARW = ARW(x_samp_ARW,log_likelihood_opt, log_prior, 10000, 0.01, μ_j, Σ, burnin = 0.25)
-total_time_ARW = time() - t2
-
-n_0 = 5000
-n_1 = 500000
-n_2 = 500
-ess_ESS_alpha = ESS_fx(x_samp_ESS_alpha[20*D:5000*D,:], n_0, n_1, n_2)
-ess_ESS_alpha10 = ESS_fx(x_samp_ESS_alpha10[20*D:5000*D,:], n_0, n_1, n_2)
-ess_AGESS = ESS_fx(x_samp_AGESS[20*D:5000*D,:],n_0, n_1, n_2)
-ess_AGESS_norm = ESS_fx(x_samp_AGESS_norm[20*D:5000*D,:], n_0, n_1, n_2)
-ess_ESS = ESS_fx(x_samp_ESS[20*D:5000*D,:], n_0, n_1, n_2)
-ess_ARW = ESS_fx(x_samp_ARW[20*D:5000*D,:], n_0, n_1, n_2)
+Σ = diagm(ones(D))
+ess_ESS_total[3], ess_ESS = run_and_ess((5000*D, D), x -> ESS(x, log_likelihood_opt, μ_j, Σ, burnin = 0.25), analyses())
+ess_ARW_total[3], ess_ARW = run_and_ess((5000*D, D), x -> ARW(x, log_likelihood_opt, log_prior, 10000, 0.01, μ_j, Σ, burnin = 0.25), analyses())
 
 labels = ["ESS (α = 1)" "ESS (α = 9)" "AGESS (t)" "AGESS (Normal)" "ESS (α = 0)" "ARW"]
 colors = [:red :blue :green :purple :orange :black]
-linestyles = [:solid :dash :dot :dashdot :dashdotdot :solid]
 shapes = [:circle :rect :utriangle :diamond :star5 :xcross]
 
 iters = collect(1:500:1_990_500)
 ess_iter = [ess_ESS_alpha ess_ESS_alpha10 ess_AGESS ess_AGESS_norm ess_ESS ess_ARW]
-plot(iters, ess_iter, label = labels, color = colors, linestyle = linestyles, linewidth = 2,
-     yscale = :log10, yticks = [0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001, 1.1], xlim = [1, 2_000_000],
-     legend = :outerright, fontfamily = "Computer Modern", titlefontsize = 16, guidefontsize = 14,
-     tickfontsize = 12, legendfontsize = 12, framestyle = :axes, grid = false)
-ylabel!(L"Effective Sample Size per Iteration ($\|x\|^2$)")
-xlabel!("MCMC Iteration")
-plot!(size = (1600, 700), dpi = 300)
-savefig(string(dir ,"//ESS_iteration_500.pdf"))
-
-
-n_0 = 100*D
-ess_ESS_alpha_total[3] = ESS_fx(x_samp_ESS_alpha[3000*D:5000*D,:], n_0)
-ess_ESS_alpha10_total[3] = ESS_fx(x_samp_ESS_alpha10[3000*D:5000*D,:], n_0)
-ess_AGESS_total[3] = ESS_fx(x_samp_AGESS[3000*D:5000*D,:], n_0)
-ess_AGESS_norm_total[3] = ESS_fx(x_samp_AGESS_norm[3000*D:5000*D,:], n_0)
-ess_ESS_total[3] = ESS_fx(x_samp_ESS[3000*D:5000*D,:], n_0)
-ess_ARW_total[3] = ESS_fx(x_samp_ARW[3000*D:5000*D,:], n_0)
 
 D_vec = [10, 100, 500]
 ess_total = [ess_ESS_alpha_total ess_ESS_alpha10_total ess_AGESS_total ess_AGESS_norm_total ess_ESS_total ess_ARW_total]
-plot(D_vec, ess_total, label = labels, color = colors, shape = shapes, markersize = 8, markerstrokewidth = 0,
-     linewidth = 2, yscale = :log10, yticks = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001, 1.1],
-     legend = :outerright, fontfamily = "Computer Modern", titlefontsize = 16, guidefontsize = 14,
-     tickfontsize = 12, legendfontsize = 12, framestyle = :axes, grid = false)
-ylabel!(L"Effective Sample Size per Iteration ($\|x\|^2$)")
-xlabel!("Dimension of Target Distribution (P)")
-plot!(size = (1600, 700), dpi = 300)
 
-savefig(string(dir ,"//ESS.pdf"))
+p1 = plot(D_vec, ess_total, color = colors, shape = shapes, markersize = 8, markerstrokewidth = 0,
+     linewidth = 2, yscale = :log10, yticks = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001, 1.1],
+     legend = false, fontfamily = "Computer Modern", titlefontsize = 26, guidefontsize = 20,
+     tickfontsize = 16, legendfontsize = 16, framestyle = :axes, grid = false, title = "Normal Target")
+ylabel!(L"Effective Sample Size per Iteration $\left(‖x‖^2\right)$")
+xlabel!(p1, "Dimension of Target Distribution (P)")
+
+p2 = plot(iters, ess_iter, color = colors, linewidth = 2,
+     yscale = :log10, yticks = [0.0001, 0.001, 0.01, 0.1, 1.0], ylim = [0.00001, 1.1], xlim = [1, 2_000_000],
+     legend = false, fontfamily = "Computer Modern", titlefontsize = 26, guidefontsize = 20,
+     tickfontsize = 16, legendfontsize = 16, framestyle = :axes, grid = false, title = "P = 500", xformatter = sci_format)
+ylabel!(L"Effective Sample Size per Iteration $\left(‖x‖^2\right)$")
+xlabel!(p2, "MCMC Iteration")
+
+p_legend = scatter(fill(NaN, 1, 6), fill(NaN, 1, 6), label = labels, color = colors, shape = shapes,
+     markersize = 8, markerstrokewidth = 0, grid = false, showaxis = false, ticks = false,
+     legend = :bottom, legend_column = 3, legendfontsize = 16, fontfamily = "Computer Modern",
+     framestyle = :none)
+
+plot(p1, p2, p_legend, layout =  @layout([a b; c{0.12h}]), dpi = 300, margin = 12Plots.mm, bottom_margin = 4Plots.mm)
+plot!(size = (1600, 750))
+savefig(string(dir ,"//ESS_combined.pdf"))
